@@ -6,16 +6,19 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/ThinkInAIXYZ/go-mcp/protocol"
 	"github.com/ThinkInAIXYZ/go-mcp/server"
 	"github.com/ThinkInAIXYZ/go-mcp/transport"
+	"github.com/jolks/mcp-cron/internal/agent"
+	"github.com/jolks/mcp-cron/internal/command"
 	"github.com/jolks/mcp-cron/internal/config"
 	"github.com/jolks/mcp-cron/internal/errors"
-	"github.com/jolks/mcp-cron/internal/executor"
 	"github.com/jolks/mcp-cron/internal/logging"
+	"github.com/jolks/mcp-cron/internal/model"
 	"github.com/jolks/mcp-cron/internal/scheduler"
 	"github.com/jolks/mcp-cron/internal/utils"
 )
@@ -28,26 +31,46 @@ type TaskParams struct {
 	ID          string `json:"id,omitempty" description:"task ID"`
 	Name        string `json:"name,omitempty" description:"task name"`
 	Schedule    string `json:"schedule,omitempty" description:"cron schedule expression"`
+	Type        string `json:"type,omitempty" description:"task type"`
 	Command     string `json:"command,omitempty" description:"command to execute"`
 	Description string `json:"description,omitempty" description:"task description"`
 	Enabled     bool   `json:"enabled,omitempty" description:"whether the task is enabled"`
 }
 
+// TaskIDParams holds the ID parameter used by multiple handlers
+type TaskIDParams struct {
+	ID string `json:"id" description:"the ID of the task to get/remove/enable/disable"`
+}
+
+// AITaskParams combines task parameters with AI parameters
+type AITaskParams struct {
+	ID          string `json:"id,omitempty" description:"task ID"`
+	Name        string `json:"name,omitempty" description:"task name"`
+	Schedule    string `json:"schedule,omitempty" description:"cron schedule expression"`
+	Type        string `json:"type,omitempty" description:"task type"`
+	Command     string `json:"command,omitempty" description:"command to execute"`
+	Description string `json:"description,omitempty" description:"task description"`
+	Enabled     bool   `json:"enabled,omitempty" description:"whether the task is enabled"`
+	// LLM Prompt
+	Prompt string `json:"prompt,omitempty" description:"prompt to use for AI"`
+}
+
 // MCPServer represents the MCP scheduler server
 type MCPServer struct {
-	scheduler *scheduler.Scheduler
-	executor  *executor.CommandExecutor
-	server    *server.Server
-	address   string
-	port      int
-	stopCh    chan struct{}
-	wg        sync.WaitGroup
-	config    *config.Config
-	logger    *logging.Logger
+	scheduler     *scheduler.Scheduler
+	cmdExecutor   *command.CommandExecutor
+	agentExecutor *agent.AgentExecutor
+	server        *server.Server
+	address       string
+	port          int
+	stopCh        chan struct{}
+	wg            sync.WaitGroup
+	config        *config.Config
+	logger        *logging.Logger
 }
 
 // NewMCPServer creates a new MCP scheduler server
-func NewMCPServer(cfg *config.Config, scheduler *scheduler.Scheduler, executor *executor.CommandExecutor) (*MCPServer, error) {
+func NewMCPServer(cfg *config.Config, scheduler *scheduler.Scheduler, cmdExecutor *command.CommandExecutor, agentExecutor *agent.AgentExecutor) (*MCPServer, error) {
 	// Create default config if not provided
 	if cfg == nil {
 		cfg = config.DefaultConfig()
@@ -102,16 +125,17 @@ func NewMCPServer(cfg *config.Config, scheduler *scheduler.Scheduler, executor *
 
 	// Create MCP Server
 	mcpServer := &MCPServer{
-		scheduler: scheduler,
-		executor:  executor,
-		address:   cfg.Server.Address,
-		port:      cfg.Server.Port,
-		stopCh:    make(chan struct{}),
-		config:    cfg,
-		logger:    logger,
+		scheduler:     scheduler,
+		cmdExecutor:   cmdExecutor,
+		agentExecutor: agentExecutor,
+		address:       cfg.Server.Address,
+		port:          cfg.Server.Port,
+		stopCh:        make(chan struct{}),
+		config:        cfg,
+		logger:        logger,
 	}
 
-	// Set the server as the task executor
+	// Set up task routing
 	scheduler.SetTaskExecutor(mcpServer)
 
 	// Create transport based on mode
@@ -222,7 +246,7 @@ func (s *MCPServer) handleGetTask(request *protocol.CallToolRequest) (*protocol.
 	return createTaskResponse(task)
 }
 
-// handleAddTask adds a new task
+// handleAddTask adds a new shell command task
 func (s *MCPServer) handleAddTask(request *protocol.CallToolRequest) (*protocol.CallToolResult, error) {
 	// Extract parameters
 	var params TaskParams
@@ -235,14 +259,50 @@ func (s *MCPServer) handleAddTask(request *protocol.CallToolRequest) (*protocol.
 
 	// Create task
 	taskID := fmt.Sprintf("task_%d", time.Now().UnixNano())
-	task := &scheduler.Task{
+	task := &model.Task{
 		ID:          taskID,
 		Name:        params.Name,
 		Schedule:    params.Schedule,
+		Type:        model.TypeShellCommand.String(),
 		Command:     params.Command,
 		Description: params.Description,
 		Enabled:     params.Enabled,
-		Status:      scheduler.StatusPending.String(),
+		Status:      model.StatusPending,
+		LastRun:     time.Now(),
+		NextRun:     time.Now(),
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+	}
+
+	// Add task to scheduler
+	if err := s.scheduler.AddTask(task); err != nil {
+		return createErrorResponse(err)
+	}
+
+	return createTaskResponse(task)
+}
+
+func (s *MCPServer) handleAddAITask(request *protocol.CallToolRequest) (*protocol.CallToolResult, error) {
+	// Extract parameters
+	var params AITaskParams
+
+	if err := extractParams(request, &params); err != nil {
+		return createErrorResponse(err)
+	}
+
+	s.logger.Debugf("Handling add_ai_task request for task %s", params.Name)
+
+	// Create task
+	taskID := fmt.Sprintf("task_%d", time.Now().UnixNano())
+	task := &model.Task{
+		ID:          taskID,
+		Name:        params.Name,
+		Schedule:    params.Schedule,
+		Type:        model.TypeAI.String(),
+		Prompt:      params.Prompt,
+		Description: params.Description,
+		Enabled:     params.Enabled,
+		Status:      model.StatusPending,
 		LastRun:     time.Now(),
 		NextRun:     time.Now(),
 		CreatedAt:   time.Now(),
@@ -260,7 +320,7 @@ func (s *MCPServer) handleAddTask(request *protocol.CallToolRequest) (*protocol.
 // handleUpdateTask updates an existing task
 func (s *MCPServer) handleUpdateTask(request *protocol.CallToolRequest) (*protocol.CallToolResult, error) {
 	// Extract parameters
-	var params TaskParams
+	var params AITaskParams
 
 	if err := extractParams(request, &params); err != nil {
 		return createErrorResponse(err)
@@ -287,8 +347,21 @@ func (s *MCPServer) handleUpdateTask(request *protocol.CallToolRequest) (*protoc
 		existingTask.Command = params.Command
 	}
 
+	if params.Prompt != "" {
+		existingTask.Prompt = params.Prompt
+	}
+
 	if params.Description != "" {
 		existingTask.Description = params.Description
+	}
+
+	// Update task type if provided
+	if params.Type != "" {
+		if strings.EqualFold(params.Type, model.TypeAI.String()) {
+			existingTask.Type = model.TypeAI.String()
+		} else if strings.EqualFold(params.Type, model.TypeShellCommand.String()) {
+			existingTask.Type = model.TypeShellCommand.String()
+		}
 	}
 
 	// Only update Enabled if it's explicitly in the JSON
@@ -375,22 +448,40 @@ func (s *MCPServer) handleDisableTask(request *protocol.CallToolRequest) (*proto
 	return createTaskResponse(task)
 }
 
-// ExecuteTask implements the scheduler.TaskExecutor interface
-func (s *MCPServer) ExecuteTask(task *scheduler.Task) error {
-	logger := logging.GetDefaultLogger().WithField("task_id", task.ID)
-	logger.Infof("Executing task: %s", task.Name)
+// Execute implements the taskexec.Executor interface by routing tasks to the appropriate executor
+func (s *MCPServer) Execute(ctx context.Context, task *model.Task, timeout time.Duration) error {
+	// Get the task type
+	taskType := task.Type
 
-	// Execute the command with the configured timeout
-	ctx := context.Background()
-	result := s.executor.ExecuteCommand(ctx, task.ID, task.Command, s.config.Scheduler.DefaultTimeout)
+	// Route to the appropriate executor based on task type
+	s.logger.Debugf("Executing task with type: %s", taskType)
 
-	if result.Error != "" {
-		logger.Errorf("Task execution failed: %v", result.Error)
-		return fmt.Errorf(result.Error)
+	switch taskType {
+	case model.TypeAI.String():
+		// Use the agent executor for AI tasks
+		s.logger.Infof("Routing to AgentExecutor for AI task")
+		return s.agentExecutor.Execute(ctx, task, timeout)
+
+	case model.TypeShellCommand.String(), "":
+		// Use the command executor for shell command tasks or when type is not specified
+		s.logger.Infof("Routing to CommandExecutor for shell command task")
+		return s.cmdExecutor.Execute(ctx, task, timeout)
+
+	default:
+		// Unknown task type
+		return fmt.Errorf("unknown task type: %s", taskType)
+	}
+}
+
+// GetTaskResult retrieves execution result for a task regardless of executor type
+func (s *MCPServer) GetTaskResult(taskID string) (*model.Result, bool) {
+	// First try to get the result from the agent executor
+	if result, exists := s.agentExecutor.GetTaskResult(taskID); exists {
+		return result, true
 	}
 
-	logger.Infof("Task completed successfully")
-	return nil
+	// If not found in agent executor, try the command executor
+	return s.cmdExecutor.GetTaskResult(taskID)
 }
 
 // Helper function to parse log level

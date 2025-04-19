@@ -38,15 +38,21 @@ func (s *MCPServer) registerToolsDeclarative() {
 		},
 		{
 			Name:        "add_task",
-			Description: "Adds a new scheduled task",
+			Description: "Adds a new scheduled shell command task",
 			Handler:     s.handleAddTask,
 			Parameters:  TaskParams{},
+		},
+		{
+			Name:        "add_ai_task",
+			Description: "Adds a new scheduled AI (LLM) task. Use the 'prompt' field to directly specify what the AI should do.",
+			Handler:     s.handleAddAITask,
+			Parameters:  AITaskParams{},
 		},
 		{
 			Name:        "update_task",
 			Description: "Updates an existing task",
 			Handler:     s.handleUpdateTask,
-			Parameters:  TaskParams{},
+			Parameters:  AITaskParams{},
 		},
 		{
 			Name:        "remove_task",

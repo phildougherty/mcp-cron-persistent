@@ -9,8 +9,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jolks/mcp-cron/internal/agent"
+	"github.com/jolks/mcp-cron/internal/command"
 	"github.com/jolks/mcp-cron/internal/config"
-	"github.com/jolks/mcp-cron/internal/executor"
 	"github.com/jolks/mcp-cron/internal/logging"
 	"github.com/jolks/mcp-cron/internal/scheduler"
 	"github.com/jolks/mcp-cron/internal/server"
@@ -91,20 +92,22 @@ func loadConfig() *config.Config {
 
 // Application represents the running application
 type Application struct {
-	scheduler *scheduler.Scheduler
-	executor  *executor.CommandExecutor
-	server    *server.MCPServer
-	logger    *logging.Logger
+	scheduler     *scheduler.Scheduler
+	cmdExecutor   *command.CommandExecutor
+	agentExecutor *agent.AgentExecutor
+	server        *server.MCPServer
+	logger        *logging.Logger
 }
 
 // createApp creates a new application instance
 func createApp(cfg *config.Config) (*Application, error) {
 	// Create components
-	exec := executor.NewCommandExecutor()
+	cmdExec := command.NewCommandExecutor()
+	agentExec := agent.NewAgentExecutor()
 	sched := scheduler.NewScheduler()
 
 	// Create the MCP server
-	mcpServer, err := server.NewMCPServer(cfg, sched, exec)
+	mcpServer, err := server.NewMCPServer(cfg, sched, cmdExec, agentExec)
 	if err != nil {
 		return nil, err
 	}
@@ -114,10 +117,11 @@ func createApp(cfg *config.Config) (*Application, error) {
 
 	// Create the application
 	app := &Application{
-		scheduler: sched,
-		executor:  exec,
-		server:    mcpServer,
-		logger:    logger,
+		scheduler:     sched,
+		cmdExecutor:   cmdExec,
+		agentExecutor: agentExec,
+		server:        mcpServer,
+		logger:        logger,
 	}
 
 	return app, nil

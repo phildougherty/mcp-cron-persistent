@@ -1,58 +1,70 @@
 package server
 
 import (
+	"context"
 	"testing"
 	"time"
 
-	"github.com/jolks/mcp-cron/internal/config"
-	"github.com/jolks/mcp-cron/internal/executor"
+	"github.com/jolks/mcp-cron/internal/agent"
+	"github.com/jolks/mcp-cron/internal/command"
+	"github.com/jolks/mcp-cron/internal/logging"
+	"github.com/jolks/mcp-cron/internal/model"
 	"github.com/jolks/mcp-cron/internal/scheduler"
 )
 
+// TestTaskExecutorImplementation verifies that the MCPServer properly
+// implements the TaskExecutor interface
 func TestTaskExecutorImplementation(t *testing.T) {
-	// Setup test dependencies
-	cfg := &config.Config{
-		Server: config.ServerConfig{
-			Address:       "127.0.0.1",
-			Port:          9999,
-			TransportMode: "stdio", // Use stdio to avoid network binding
-		},
-		Scheduler: config.SchedulerConfig{
-			DefaultTimeout: 1 * time.Minute,
-		},
-	}
-
+	// Create a mock scheduler
 	sched := scheduler.NewScheduler()
-	exec := executor.NewCommandExecutor()
 
-	// Create server
-	server, err := NewMCPServer(cfg, sched, exec)
-	if err != nil {
-		t.Fatalf("Failed to create server: %v", err)
+	// Create executors
+	cmdExec := command.NewCommandExecutor()
+	agentExec := agent.NewAgentExecutor()
+
+	// Create a logger
+	logger := logging.New(logging.Options{
+		Level: logging.Info,
+	})
+
+	// Create a server
+	server := &MCPServer{
+		scheduler:     sched,
+		cmdExecutor:   cmdExec,
+		agentExecutor: agentExec,
+		logger:        logger,
 	}
 
-	// Create a task
-	task := &scheduler.Task{
-		ID:          "test-direct-task",
-		Name:        "Test Direct Execution Task",
+	// Set the server as the task executor for the scheduler
+	sched.SetTaskExecutor(server)
+
+	// Create a test task
+	task := &model.Task{
+		ID:          "test-task",
+		Name:        "Test Task",
 		Schedule:    "* * * * *",
-		Command:     "echo test",
+		Type:        model.TypeShellCommand.String(),
+		Command:     "echo hello",
 		Description: "Task for testing direct execution",
 		Enabled:     true,
-		Status:      scheduler.StatusPending.String(),
+		Status:      model.StatusPending,
 	}
 
+	// Create context with a reasonable timeout
+	ctx := context.Background()
+	timeout := 5 * time.Second
+
 	// Verify that the MCPServer implements the TaskExecutor interface
-	// by directly calling the ExecuteTask method
-	err = server.ExecuteTask(task)
+	// by directly calling the Execute method
+	err := server.Execute(ctx, task, timeout)
 	if err != nil {
-		t.Fatalf("ExecuteTask failed: %v", err)
+		t.Fatalf("Execute failed: %v", err)
 	}
 
 	// Verify the status was not changed (since it's the scheduler's job to update it)
-	if task.Status != scheduler.StatusPending.String() {
+	if task.Status != model.StatusPending {
 		t.Errorf("Expected task status to remain %s, got %s",
-			scheduler.StatusPending.String(), task.Status)
+			model.StatusPending, task.Status)
 	}
 
 	// Now add the task to scheduler
@@ -80,21 +92,21 @@ func TestTaskExecutorImplementation(t *testing.T) {
 	}
 
 	// Manually simulate task execution by the scheduler
-	retrievedTask.Status = scheduler.StatusRunning.String()
+	retrievedTask.Status = model.StatusRunning
 
 	// Execute the task
-	err = server.ExecuteTask(retrievedTask)
+	err = server.Execute(ctx, retrievedTask, timeout)
 	if err != nil {
-		t.Fatalf("ExecuteTask failed: %v", err)
+		t.Fatalf("Execute failed: %v", err)
 	}
 
 	// In a real scenario, the scheduler would update this after execution
 	// Here we'll simulate that for testing
-	retrievedTask.Status = scheduler.StatusCompleted.String()
+	retrievedTask.Status = model.StatusCompleted
 
 	// Verify the task execution was successful
-	if retrievedTask.Status != scheduler.StatusCompleted.String() {
+	if retrievedTask.Status != model.StatusCompleted {
 		t.Errorf("Expected status %s, got %s",
-			scheduler.StatusCompleted.String(), retrievedTask.Status)
+			model.StatusCompleted, retrievedTask.Status)
 	}
 }
