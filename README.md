@@ -215,10 +215,6 @@ go test ./...
 go test ./... -cover
 ```
 
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
 ## Acknowledgments
 
 - [ThinkInAIXYZ/go-mcp](https://github.com/ThinkInAIXYZ/go-mcp) - Go SDK for the Model Context Protocol
