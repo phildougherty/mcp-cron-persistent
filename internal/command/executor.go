@@ -1,45 +1,55 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-package executor
+package command
 
 import (
 	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"os/exec"
 	"strings"
 	"sync"
 	"time"
-)
 
-// CommandResult contains the results of a command execution
-type CommandResult struct {
-	Command   string    `json:"command"`
-	ExitCode  int       `json:"exit_code"`
-	Output    string    `json:"output"`
-	Error     string    `json:"error,omitempty"`
-	StartTime time.Time `json:"start_time"`
-	EndTime   time.Time `json:"end_time"`
-	TaskID    string    `json:"task_id"`
-	Duration  string    `json:"duration"`
-}
+	"github.com/jolks/mcp-cron/internal/model"
+)
 
 // CommandExecutor handles executing commands
 type CommandExecutor struct {
 	mu      sync.Mutex
-	results map[string]*CommandResult // Map of taskID -> CommandResult
+	results map[string]*model.Result // Map of taskID -> Result
 }
 
 // NewCommandExecutor creates a new command executor
 func NewCommandExecutor() *CommandExecutor {
 	return &CommandExecutor{
-		results: make(map[string]*CommandResult),
+		results: make(map[string]*model.Result),
 	}
 }
 
+// Execute implements the Task execution for the scheduler
+func (ce *CommandExecutor) Execute(ctx context.Context, task *model.Task, timeout time.Duration) error {
+	// Runtime validation only checks fields needed for execution (ID and Command)
+	// Schedule is validated at the API level but not required here because:
+	// - The scheduler has already used the schedule to determine when to run the task
+	// - Execution only needs the task ID and the command to execute
+	if task.ID == "" || task.Command == "" {
+		return fmt.Errorf("invalid task: missing ID or Command")
+	}
+
+	// Execute the command
+	result := ce.ExecuteCommand(ctx, task.ID, task.Command, timeout)
+	if result.Error != "" {
+		return fmt.Errorf(result.Error)
+	}
+
+	return nil
+}
+
 // ExecuteCommand executes a shell command with a timeout
-func (e *CommandExecutor) ExecuteCommand(ctx context.Context, taskID, command string, timeout time.Duration) *CommandResult {
+func (ce *CommandExecutor) ExecuteCommand(ctx context.Context, taskID, command string, timeout time.Duration) *model.Result {
 	// Create a cancellable context with timeout
 	execCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -51,16 +61,16 @@ func (e *CommandExecutor) ExecuteCommand(ctx context.Context, taskID, command st
 	cmd.Stderr = &stderr
 
 	// Create result object
-	result := &CommandResult{
+	result := &model.Result{
 		Command:   command,
 		StartTime: time.Now(),
 		TaskID:    taskID,
 	}
 
 	// Store the result
-	e.mu.Lock()
-	e.results[taskID] = result
-	e.mu.Unlock()
+	ce.mu.Lock()
+	ce.results[taskID] = result
+	ce.mu.Unlock()
 
 	// Execute the command
 	err := cmd.Run()
@@ -94,4 +104,13 @@ func (e *CommandExecutor) ExecuteCommand(ctx context.Context, taskID, command st
 	}
 
 	return result
+}
+
+// GetTaskResult returns the result of a previously executed task
+func (ce *CommandExecutor) GetTaskResult(taskID string) (*model.Result, bool) {
+	ce.mu.Lock()
+	defer ce.mu.Unlock()
+
+	result, exists := ce.results[taskID]
+	return result, exists
 }

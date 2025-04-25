@@ -10,20 +10,24 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jolks/mcp-cron/internal/agent"
+	"github.com/jolks/mcp-cron/internal/command"
 	"github.com/jolks/mcp-cron/internal/config"
-	"github.com/jolks/mcp-cron/internal/executor"
 	"github.com/jolks/mcp-cron/internal/logging"
 	"github.com/jolks/mcp-cron/internal/scheduler"
 	"github.com/jolks/mcp-cron/internal/server"
 )
 
 var (
-	address   = flag.String("address", "", "The address to bind the server to")
-	port      = flag.Int("port", 0, "The port to bind the server to")
-	transport = flag.String("transport", "", "Transport mode: sse or stdio")
-	logLevel  = flag.String("log-level", "", "Logging level: debug, info, warn, error, fatal")
-	logFile   = flag.String("log-file", "", "Log file path (default: stdout)")
-	version   = flag.Bool("version", false, "Show version information and exit")
+	address         = flag.String("address", "", "The address to bind the server to")
+	port            = flag.Int("port", 0, "The port to bind the server to")
+	transport       = flag.String("transport", "", "Transport mode: sse or stdio")
+	logLevel        = flag.String("log-level", "", "Logging level: debug, info, warn, error, fatal")
+	logFile         = flag.String("log-file", "", "Log file path (default: stdout)")
+	version         = flag.Bool("version", false, "Show version information and exit")
+	aiModel         = flag.String("ai-model", "", "AI model to use for AI tasks (default: gpt-4o)")
+	aiMaxIterations = flag.Int("ai-max-iterations", 0, "Maximum iterations for tool-enabled AI tasks (default: 20)")
+	mcpConfigPath   = flag.String("mcp-config-path", "", "Path to MCP configuration file (default: ~/.cursor/mcp.json)")
 )
 
 func main() {
@@ -82,6 +86,17 @@ func loadConfig() *config.Config {
 		cfg.Logging.FilePath = *logFile
 	}
 
+	// AI-related command-line flags
+	if *aiModel != "" {
+		cfg.AI.Model = *aiModel
+	}
+	if *aiMaxIterations > 0 {
+		cfg.AI.MaxToolIterations = *aiMaxIterations
+	}
+	if *mcpConfigPath != "" {
+		cfg.AI.MCPConfigFilePath = *mcpConfigPath
+	}
+
 	// Validate the configuration
 	if err := cfg.Validate(); err != nil {
 		log.Fatalf("Invalid configuration: %v", err)
@@ -92,20 +107,22 @@ func loadConfig() *config.Config {
 
 // Application represents the running application
 type Application struct {
-	scheduler *scheduler.Scheduler
-	executor  *executor.CommandExecutor
-	server    *server.MCPServer
-	logger    *logging.Logger
+	scheduler     *scheduler.Scheduler
+	cmdExecutor   *command.CommandExecutor
+	agentExecutor *agent.AgentExecutor
+	server        *server.MCPServer
+	logger        *logging.Logger
 }
 
 // createApp creates a new application instance
 func createApp(cfg *config.Config) (*Application, error) {
 	// Create components
-	exec := executor.NewCommandExecutor()
+	cmdExec := command.NewCommandExecutor()
+	agentExec := agent.NewAgentExecutor(cfg)
 	sched := scheduler.NewScheduler()
 
 	// Create the MCP server
-	mcpServer, err := server.NewMCPServer(cfg, sched, exec)
+	mcpServer, err := server.NewMCPServer(cfg, sched, cmdExec, agentExec)
 	if err != nil {
 		return nil, err
 	}
@@ -115,10 +132,11 @@ func createApp(cfg *config.Config) (*Application, error) {
 
 	// Create the application
 	app := &Application{
-		scheduler: sched,
-		executor:  exec,
-		server:    mcpServer,
-		logger:    logger,
+		scheduler:     sched,
+		cmdExecutor:   cmdExec,
+		agentExecutor: agentExec,
+		server:        mcpServer,
+		logger:        logger,
 	}
 
 	return app, nil

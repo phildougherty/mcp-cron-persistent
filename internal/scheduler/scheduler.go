@@ -8,36 +8,17 @@ import (
 	"time"
 
 	"github.com/jolks/mcp-cron/internal/errors"
+	"github.com/jolks/mcp-cron/internal/model"
 	"github.com/robfig/cron/v3"
 )
-
-// Task represents a scheduled task
-type Task struct {
-	ID          string
-	Name        string
-	Schedule    string
-	Command     string
-	Description string
-	Enabled     bool
-	LastRun     time.Time
-	NextRun     time.Time
-	Status      string
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
-}
-
-// TaskExecutor defines the interface for executing tasks
-type TaskExecutor interface {
-	ExecuteTask(task *Task) error
-}
 
 // Scheduler manages cron tasks
 type Scheduler struct {
 	cron         *cron.Cron
-	tasks        map[string]*Task
+	tasks        map[string]*model.Task
 	entryIDs     map[string]cron.EntryID
 	mu           sync.RWMutex
-	taskExecutor TaskExecutor
+	taskExecutor model.Executor
 }
 
 // NewScheduler creates a new scheduler instance
@@ -52,7 +33,7 @@ func NewScheduler() *Scheduler {
 
 	scheduler := &Scheduler{
 		cron:     cronOpts,
-		tasks:    make(map[string]*Task),
+		tasks:    make(map[string]*model.Task),
 		entryIDs: make(map[string]cron.EntryID),
 	}
 
@@ -81,7 +62,7 @@ func (s *Scheduler) Stop() error {
 }
 
 // AddTask adds a new task to the scheduler
-func (s *Scheduler) AddTask(task *Task) error {
+func (s *Scheduler) AddTask(task *model.Task) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -93,7 +74,12 @@ func (s *Scheduler) AddTask(task *Task) error {
 	s.tasks[task.ID] = task
 
 	if task.Enabled {
-		return s.scheduleTask(task)
+		err := s.scheduleTask(task)
+		if err != nil {
+			// If scheduling fails, set the task status to failed
+			task.Status = model.StatusFailed
+			return err
+		}
 	}
 
 	return nil
@@ -137,7 +123,15 @@ func (s *Scheduler) EnableTask(taskID string) error {
 
 	task.Enabled = true
 	task.UpdatedAt = time.Now()
-	return s.scheduleTask(task)
+
+	err := s.scheduleTask(task)
+	if err != nil {
+		// If scheduling fails, set the task status to failed
+		task.Status = model.StatusFailed
+		return err
+	}
+
+	return nil
 }
 
 // DisableTask disables a running task
@@ -161,13 +155,13 @@ func (s *Scheduler) DisableTask(taskID string) error {
 	}
 
 	task.Enabled = false
-	task.Status = StatusDisabled.String()
+	task.Status = model.StatusDisabled
 	task.UpdatedAt = time.Now()
 	return nil
 }
 
 // GetTask retrieves a task by ID
-func (s *Scheduler) GetTask(taskID string) (*Task, error) {
+func (s *Scheduler) GetTask(taskID string) (*model.Task, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -180,11 +174,11 @@ func (s *Scheduler) GetTask(taskID string) (*Task, error) {
 }
 
 // ListTasks returns all tasks
-func (s *Scheduler) ListTasks() []*Task {
+func (s *Scheduler) ListTasks() []*model.Task {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	tasks := make([]*Task, 0, len(s.tasks))
+	tasks := make([]*model.Task, 0, len(s.tasks))
 	for _, task := range s.tasks {
 		tasks = append(tasks, task)
 	}
@@ -193,7 +187,7 @@ func (s *Scheduler) ListTasks() []*Task {
 }
 
 // UpdateTask updates an existing task
-func (s *Scheduler) UpdateTask(task *Task) error {
+func (s *Scheduler) UpdateTask(task *model.Task) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -223,25 +217,25 @@ func (s *Scheduler) UpdateTask(task *Task) error {
 }
 
 // SetTaskExecutor sets the executor to be used for task execution
-func (s *Scheduler) SetTaskExecutor(executor TaskExecutor) {
+func (s *Scheduler) SetTaskExecutor(executor model.Executor) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.taskExecutor = executor
 }
 
 // NewTask creates a new task with default values
-func NewTask() *Task {
+func NewTask() *model.Task {
 	now := time.Now()
-	return &Task{
+	return &model.Task{
 		Enabled:   false,
-		Status:    StatusPending.String(),
+		Status:    model.StatusPending,
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
 }
 
 // scheduleTask adds a task to the cron scheduler (internal method)
-func (s *Scheduler) scheduleTask(task *Task) error {
+func (s *Scheduler) scheduleTask(task *model.Task) error {
 	// Ensure we have a task executor
 	if s.taskExecutor == nil {
 		return fmt.Errorf("cannot schedule task: no task executor set")
@@ -250,13 +244,16 @@ func (s *Scheduler) scheduleTask(task *Task) error {
 	// Create the job function that will execute when scheduled
 	jobFunc := func() {
 		task.LastRun = time.Now()
-		task.Status = StatusRunning.String()
+		task.Status = model.StatusRunning
 
 		// Execute the task
-		if err := s.taskExecutor.ExecuteTask(task); err != nil {
-			task.Status = StatusFailed.String()
+		ctx := context.Background()
+		timeout := 5 * time.Minute // Default timeout, could be made configurable
+
+		if err := s.taskExecutor.Execute(ctx, task, timeout); err != nil {
+			task.Status = model.StatusFailed
 		} else {
-			task.Status = StatusCompleted.String()
+			task.Status = model.StatusCompleted
 		}
 
 		task.UpdatedAt = time.Now()

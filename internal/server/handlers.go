@@ -7,7 +7,7 @@ import (
 
 	"github.com/ThinkInAIXYZ/go-mcp/protocol"
 	"github.com/jolks/mcp-cron/internal/errors"
-	"github.com/jolks/mcp-cron/internal/scheduler"
+	"github.com/jolks/mcp-cron/internal/model"
 	"github.com/jolks/mcp-cron/internal/utils"
 )
 
@@ -17,12 +17,10 @@ type successResponse struct {
 	Message string `json:"message"`
 }
 
-// TaskIDParams holds the ID parameter used by multiple handlers
-type TaskIDParams struct {
-	ID string `json:"id" description:"the ID of the task to retrieve/remove/enable/disable"`
-}
-
 // extractParams extracts and validates parameters from a request
+// This function handles the basic JSON unmarshaling of request parameters
+// but does not perform domain-specific validation (e.g., required fields)
+// which should be done by the individual handlers
 func extractParams(request *protocol.CallToolRequest, params interface{}) error {
 	if err := utils.JsonUnmarshal(request.RawArguments, params); err != nil {
 		return errors.InvalidInput(fmt.Sprintf("invalid parameters: %v", err))
@@ -32,9 +30,14 @@ func extractParams(request *protocol.CallToolRequest, params interface{}) error 
 
 // extractTaskIDParam is a helper to extract and validate a task ID parameter
 func extractTaskIDParam(request *protocol.CallToolRequest) (string, error) {
-	var params TaskIDParams
+	var params struct {
+		ID string `json:"id"`
+	}
 	if err := extractParams(request, &params); err != nil {
 		return "", err
+	}
+	if params.ID == "" {
+		return "", errors.InvalidInput("missing required parameter: id")
 	}
 	return params.ID, nil
 }
@@ -69,7 +72,7 @@ func createErrorResponse(err error) (*protocol.CallToolResult, error) {
 }
 
 // createTaskResponse creates a response containing a task
-func createTaskResponse(task *scheduler.Task) (*protocol.CallToolResult, error) {
+func createTaskResponse(task *model.Task) (*protocol.CallToolResult, error) {
 	taskJSON, err := json.Marshal(task)
 	if err != nil {
 		return nil, errors.Internal(fmt.Errorf("failed to marshal task: %w", err))
@@ -86,7 +89,7 @@ func createTaskResponse(task *scheduler.Task) (*protocol.CallToolResult, error) 
 }
 
 // createTasksResponse creates a response containing multiple tasks
-func createTasksResponse(tasks []*scheduler.Task) (*protocol.CallToolResult, error) {
+func createTasksResponse(tasks []*model.Task) (*protocol.CallToolResult, error) {
 	tasksJSON, err := json.Marshal(tasks)
 	if err != nil {
 		return nil, errors.Internal(fmt.Errorf("failed to marshal tasks: %w", err))

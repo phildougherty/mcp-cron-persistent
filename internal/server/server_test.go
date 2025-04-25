@@ -4,6 +4,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -11,15 +12,18 @@ import (
 	"time"
 
 	"github.com/ThinkInAIXYZ/go-mcp/protocol"
+	"github.com/jolks/mcp-cron/internal/agent"
+	"github.com/jolks/mcp-cron/internal/command"
 	"github.com/jolks/mcp-cron/internal/config"
-	"github.com/jolks/mcp-cron/internal/executor"
+	"github.com/jolks/mcp-cron/internal/logging"
+	"github.com/jolks/mcp-cron/internal/model"
 	"github.com/jolks/mcp-cron/internal/scheduler"
 )
 
 func TestNewMCPServer(t *testing.T) {
 	// Create dependencies
 	sched := scheduler.NewScheduler()
-	exec := executor.NewCommandExecutor()
+	exec := command.NewCommandExecutor()
 
 	// Test with proper config values
 	cfg := &config.Config{
@@ -29,7 +33,9 @@ func TestNewMCPServer(t *testing.T) {
 			TransportMode: "sse",
 		},
 	}
-	server, err := NewMCPServer(cfg, sched, exec)
+
+	agentExec := agent.NewAgentExecutor(cfg)
+	server, err := NewMCPServer(cfg, sched, exec, agentExec)
 	if err != nil {
 		t.Fatalf("Failed to create server with default config: %v", err)
 	}
@@ -51,7 +57,7 @@ func TestNewMCPServer(t *testing.T) {
 func TestNewMCPServerWithCustomConfig(t *testing.T) {
 	// Create dependencies
 	sched := scheduler.NewScheduler()
-	exec := executor.NewCommandExecutor()
+	exec := command.NewCommandExecutor()
 
 	// Test with custom config
 	cfg := &config.Config{
@@ -62,7 +68,8 @@ func TestNewMCPServerWithCustomConfig(t *testing.T) {
 		},
 	}
 
-	server, err := NewMCPServer(cfg, sched, exec)
+	agentExec := agent.NewAgentExecutor(cfg)
+	server, err := NewMCPServer(cfg, sched, exec, agentExec)
 	if err != nil {
 		t.Fatalf("Failed to create server with custom config: %v", err)
 	}
@@ -84,7 +91,7 @@ func TestMCPServerStartStop(t *testing.T) {
 
 	// Create dependencies
 	sched := scheduler.NewScheduler()
-	exec := executor.NewCommandExecutor()
+	exec := command.NewCommandExecutor()
 
 	// Create server with stdio transport to avoid network binding
 	cfg := &config.Config{
@@ -93,7 +100,8 @@ func TestMCPServerStartStop(t *testing.T) {
 		},
 	}
 
-	server, err := NewMCPServer(cfg, sched, exec)
+	agentExec := agent.NewAgentExecutor(cfg)
+	server, err := NewMCPServer(cfg, sched, exec, agentExec)
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
 	}
@@ -125,7 +133,7 @@ func TestTaskHandlers(t *testing.T) {
 
 	// Create dependencies
 	sched := scheduler.NewScheduler()
-	exec := executor.NewCommandExecutor()
+	exec := command.NewCommandExecutor()
 
 	// Create server with stdio transport to avoid network binding
 	cfg := &config.Config{
@@ -134,7 +142,8 @@ func TestTaskHandlers(t *testing.T) {
 		},
 	}
 
-	server, err := NewMCPServer(cfg, sched, exec)
+	agentExec := agent.NewAgentExecutor(cfg)
+	server, err := NewMCPServer(cfg, sched, exec, agentExec)
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
 	}
@@ -154,7 +163,7 @@ func TestTaskCreationTimeFields(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	exec := executor.NewCommandExecutor()
+	exec := command.NewCommandExecutor()
 
 	// Create server
 	cfg := &config.Config{
@@ -163,7 +172,8 @@ func TestTaskCreationTimeFields(t *testing.T) {
 		},
 	}
 
-	server, err := NewMCPServer(cfg, sched, exec)
+	agentExec := agent.NewAgentExecutor(cfg)
+	server, err := NewMCPServer(cfg, sched, exec, agentExec)
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
 	}
@@ -237,7 +247,7 @@ func TestLogFilePath(t *testing.T) {
 
 	// Create dependencies
 	sched := scheduler.NewScheduler()
-	exec := executor.NewCommandExecutor()
+	exec := command.NewCommandExecutor()
 
 	// Create a test logger to capture log messages
 	var logBuffer bytes.Buffer
@@ -270,7 +280,8 @@ func TestLogFilePath(t *testing.T) {
 		},
 	}
 
-	_, err = NewMCPServer(cfg, sched, exec)
+	agentExec := agent.NewAgentExecutor(cfg)
+	_, err = NewMCPServer(cfg, sched, exec, agentExec)
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
 	}
@@ -281,5 +292,184 @@ func TestLogFilePath(t *testing.T) {
 	// Verify that the log path is set to be in the same directory as the executable
 	if capturedLogPath != expectedLogPath {
 		t.Errorf("Expected log path %s, got %s", expectedLogPath, capturedLogPath)
+	}
+}
+
+// TestTaskTypeHandling verifies that task types are correctly handled during creation and update
+func TestTaskTypeHandling(t *testing.T) {
+	// Create dependencies
+	sched := scheduler.NewScheduler()
+	cmdExec := command.NewCommandExecutor()
+
+	// Create a config for testing
+	cfg := config.DefaultConfig()
+
+	agentExec := agent.NewAgentExecutor(cfg)
+
+	// Create a logger
+	logger := logging.New(logging.Options{
+		Level: logging.Info,
+	})
+
+	// Create server
+	server := &MCPServer{
+		scheduler:     sched,
+		cmdExecutor:   cmdExec,
+		agentExecutor: agentExec,
+		logger:        logger,
+	}
+
+	// Set the server as task executor (required for scheduling)
+	sched.SetTaskExecutor(server)
+
+	// Test 1: Create a task with default type (shell_command)
+	defaultTypeRequest := &protocol.CallToolRequest{
+		RawArguments: []byte(`{
+			"name": "Default Type Task",
+			"schedule": "* * * * *",
+			"command": "echo default",
+			"description": "Task with default type",
+			"enabled": false
+		}`),
+	}
+
+	result, err := server.handleAddTask(defaultTypeRequest)
+	if err != nil {
+		t.Fatalf("handleAddTask failed for default type: %v", err)
+	}
+	if result == nil {
+		t.Fatal("handleAddTask returned nil result for default type")
+	}
+
+	// Test 2: Create a task with explicit AI type (case insensitive)
+	aiTypeRequest := &protocol.CallToolRequest{
+		RawArguments: []byte(`{
+			"name": "AI Type Task",
+			"schedule": "* * * * *",
+			"prompt": "prompt for AI",
+			"description": "Task with AI type",
+			"type": "ai",
+			"enabled": false
+		}`),
+	}
+
+	result, err = server.handleAddAITask(aiTypeRequest)
+	if err != nil {
+		t.Fatalf("handleAddAITask failed for AI type: %v", err)
+	}
+	if result == nil {
+		t.Fatal("handleAddAITask returned nil result for AI type")
+	}
+
+	// Test 3: Create a task with explicit AI type (different case)
+	aiTypeUpperRequest := &protocol.CallToolRequest{
+		RawArguments: []byte(`{
+			"name": "AI Type Upper Task",
+			"schedule": "* * * * *",
+			"prompt": "prompt for AI",
+			"description": "Task with AI type uppercase",
+			"type": "AI",
+			"enabled": false
+		}`),
+	}
+
+	result, err = server.handleAddAITask(aiTypeUpperRequest)
+	if err != nil {
+		t.Fatalf("handleAddAITask failed for AI uppercase type: %v", err)
+	}
+	if result == nil {
+		t.Fatal("handleAddAITask returned nil result for AI uppercase type")
+	}
+
+	// Verify tasks were created with correct types
+	tasks := sched.ListTasks()
+	if len(tasks) != 3 {
+		t.Fatalf("Expected 3 tasks, but got %d", len(tasks))
+	}
+
+	// Check types
+	var defaultTypeTask, aiLowerTypeTask, aiUpperTypeTask *model.Task
+	for _, task := range tasks {
+		if task.Name == "Default Type Task" {
+			defaultTypeTask = task
+		} else if task.Name == "AI Type Task" {
+			aiLowerTypeTask = task
+		} else if task.Name == "AI Type Upper Task" {
+			aiUpperTypeTask = task
+		}
+	}
+
+	// Verify default type
+	if defaultTypeTask == nil {
+		t.Fatal("Default type task not found")
+	}
+	if defaultTypeTask.Type != model.TypeShellCommand.String() {
+		t.Errorf("Expected default type to be %s, got %s", model.TypeShellCommand.String(), defaultTypeTask.Type)
+	}
+
+	// Verify lowercase AI type
+	if aiLowerTypeTask == nil {
+		t.Fatal("AI lowercase type task not found")
+	}
+	if aiLowerTypeTask.Type != model.TypeAI.String() {
+		t.Errorf("Expected lowercase AI type to be %s, got %s", model.TypeAI.String(), aiLowerTypeTask.Type)
+	}
+
+	// Verify uppercase AI type
+	if aiUpperTypeTask == nil {
+		t.Fatal("AI uppercase type task not found")
+	}
+	if aiUpperTypeTask.Type != model.TypeAI.String() {
+		t.Errorf("Expected uppercase AI type to be %s, got %s", model.TypeAI.String(), aiUpperTypeTask.Type)
+	}
+
+	// Test 4: Update task type from shell_command to AI
+	updateTypeRequest := &protocol.CallToolRequest{
+		RawArguments: []byte(fmt.Sprintf(`{
+			"id": "%s",
+			"type": "ai"
+		}`, defaultTypeTask.ID)),
+	}
+
+	result, err = server.handleUpdateTask(updateTypeRequest)
+	if err != nil {
+		t.Fatalf("handleUpdateTask failed for type update: %v", err)
+	}
+	if result == nil {
+		t.Fatal("handleUpdateTask returned nil result for type update")
+	}
+
+	// Verify the task type was updated
+	updatedTask, err := sched.GetTask(defaultTypeTask.ID)
+	if err != nil {
+		t.Fatalf("Failed to get updated task: %v", err)
+	}
+	if updatedTask.Type != model.TypeAI.String() {
+		t.Errorf("Expected updated type to be %s, got %s", model.TypeAI.String(), updatedTask.Type)
+	}
+
+	// Test 5: Update task type from AI to shell_command
+	updateTypeBackRequest := &protocol.CallToolRequest{
+		RawArguments: []byte(fmt.Sprintf(`{
+			"id": "%s",
+			"type": "shell_command"
+		}`, aiLowerTypeTask.ID)),
+	}
+
+	result, err = server.handleUpdateTask(updateTypeBackRequest)
+	if err != nil {
+		t.Fatalf("handleUpdateTask failed for reverse type update: %v", err)
+	}
+	if result == nil {
+		t.Fatal("handleUpdateTask returned nil result for reverse type update")
+	}
+
+	// Verify the task type was updated back
+	updatedBackTask, err := sched.GetTask(aiLowerTypeTask.ID)
+	if err != nil {
+		t.Fatalf("Failed to get task updated back: %v", err)
+	}
+	if updatedBackTask.Type != model.TypeShellCommand.String() {
+		t.Errorf("Expected updated back type to be %s, got %s", model.TypeShellCommand.String(), updatedBackTask.Type)
 	}
 }

@@ -4,6 +4,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -19,6 +20,9 @@ type Config struct {
 
 	// Logging configuration
 	Logging LoggingConfig
+
+	// AI configuration
+	AI AIConfig
 }
 
 // ServerConfig holds server-specific configuration
@@ -60,6 +64,24 @@ type LoggingConfig struct {
 	FilePath string
 }
 
+// AIConfig holds AI-specific configuration
+type AIConfig struct {
+	// OpenAI API key
+	OpenAIAPIKey string
+
+	// Enable OpenAI integration tests
+	EnableOpenAITests bool
+
+	// LLM model to use for AI tasks
+	Model string
+
+	// Maximum iterations for tool-enabled tasks
+	MaxToolIterations int
+
+	// File path for the MCP configuration
+	MCPConfigFilePath string
+}
+
 // DefaultConfig returns the default configuration
 func DefaultConfig() *Config {
 	return &Config{
@@ -78,6 +100,13 @@ func DefaultConfig() *Config {
 		Logging: LoggingConfig{
 			Level:    "info",
 			FilePath: "",
+		},
+		AI: AIConfig{
+			OpenAIAPIKey:      "",
+			EnableOpenAITests: false,
+			Model:             "gpt-4o",
+			MaxToolIterations: 20,
+			MCPConfigFilePath: filepath.Join(os.Getenv("HOME"), ".cursor", "mcp.json"),
 		},
 	}
 }
@@ -110,57 +139,85 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("log level must be one of: debug, info, warn, error, fatal")
 	}
 
+	// Validate AI config
+	if c.AI.MaxToolIterations < 1 {
+		return fmt.Errorf("max tool iterations must be at least 1")
+	}
+
 	return nil
 }
 
 // FromEnv loads configuration from environment variables
 func FromEnv(config *Config) {
 	// Server configuration
-	if val := os.Getenv("MCP_SERVER_ADDRESS"); val != "" {
+	if val := os.Getenv("MCP_CRON_SERVER_ADDRESS"); val != "" {
 		config.Server.Address = val
 	}
 
-	if val := os.Getenv("MCP_SERVER_PORT"); val != "" {
+	if val := os.Getenv("MCP_CRON_SERVER_PORT"); val != "" {
 		if port, err := strconv.Atoi(val); err == nil {
 			config.Server.Port = port
 		}
 	}
 
-	if val := os.Getenv("MCP_SERVER_TRANSPORT"); val != "" {
+	if val := os.Getenv("MCP_CRON_SERVER_TRANSPORT"); val != "" {
 		config.Server.TransportMode = val
 	}
 
-	if val := os.Getenv("MCP_SERVER_NAME"); val != "" {
+	if val := os.Getenv("MCP_CRON_SERVER_NAME"); val != "" {
 		config.Server.Name = val
 	}
 
-	if val := os.Getenv("MCP_SERVER_VERSION"); val != "" {
+	if val := os.Getenv("MCP_CRON_SERVER_VERSION"); val != "" {
 		config.Server.Version = val
 	}
 
 	// Scheduler configuration
-	if val := os.Getenv("MCP_SCHEDULER_MAX_CONCURRENT"); val != "" {
+	if val := os.Getenv("MCP_CRON_SCHEDULER_MAX_CONCURRENT"); val != "" {
 		if maxConcurrent, err := strconv.Atoi(val); err == nil {
 			config.Scheduler.MaxConcurrent = maxConcurrent
 		}
 	}
 
-	if val := os.Getenv("MCP_SCHEDULER_DEFAULT_TIMEOUT"); val != "" {
+	if val := os.Getenv("MCP_CRON_SCHEDULER_DEFAULT_TIMEOUT"); val != "" {
 		if duration, err := time.ParseDuration(val); err == nil {
 			config.Scheduler.DefaultTimeout = duration
 		}
 	}
 
-	if val := os.Getenv("MCP_SCHEDULER_EXECUTION_DIR"); val != "" {
+	if val := os.Getenv("MCP_CRON_SCHEDULER_EXECUTION_DIR"); val != "" {
 		config.Scheduler.ExecutionDir = val
 	}
 
 	// Logging configuration
-	if val := os.Getenv("MCP_LOGGING_LEVEL"); val != "" {
+	if val := os.Getenv("MCP_CRON_LOGGING_LEVEL"); val != "" {
 		config.Logging.Level = val
 	}
 
-	if val := os.Getenv("MCP_LOGGING_FILE"); val != "" {
+	if val := os.Getenv("MCP_CRON_LOGGING_FILE"); val != "" {
 		config.Logging.FilePath = val
+	}
+
+	// AI configuration
+	if val := os.Getenv("OPENAI_API_KEY"); val != "" {
+		config.AI.OpenAIAPIKey = val
+	}
+
+	if val := os.Getenv("MCP_CRON_ENABLE_OPENAI_TESTS"); val != "" {
+		config.AI.EnableOpenAITests = strings.ToLower(val) == "true"
+	}
+
+	if val := os.Getenv("MCP_CRON_AI_MODEL"); val != "" {
+		config.AI.Model = val
+	}
+
+	if val := os.Getenv("MCP_CRON_AI_MAX_TOOL_ITERATIONS"); val != "" {
+		if iterations, err := strconv.Atoi(val); err == nil {
+			config.AI.MaxToolIterations = iterations
+		}
+	}
+
+	if val := os.Getenv("MCP_CRON_MCP_CONFIG_FILE_PATH"); val != "" {
+		config.AI.MCPConfigFilePath = val
 	}
 }

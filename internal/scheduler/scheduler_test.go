@@ -6,17 +6,19 @@ import (
 	"fmt"
 	"testing"
 	"time"
+
+	"github.com/jolks/mcp-cron/internal/model"
 )
 
-// MockTaskExecutor implements the TaskExecutor interface for testing
+// MockTaskExecutor implements the model.Executor interface for testing
 type MockTaskExecutor struct {
-	ExecuteTaskFunc func(task *Task) error
+	ExecuteFunc func(ctx context.Context, task *model.Task, timeout time.Duration) error
 }
 
-// ExecuteTask fulfills the TaskExecutor interface
-func (m *MockTaskExecutor) ExecuteTask(task *Task) error {
-	if m.ExecuteTaskFunc != nil {
-		return m.ExecuteTaskFunc(task)
+// Execute fulfills the model.Executor interface
+func (m *MockTaskExecutor) Execute(ctx context.Context, task *model.Task, timeout time.Duration) error {
+	if m.ExecuteFunc != nil {
+		return m.ExecuteFunc(ctx, task, timeout)
 	}
 	return nil
 }
@@ -40,13 +42,14 @@ func TestNewScheduler(t *testing.T) {
 func TestAddGetTask(t *testing.T) {
 	s := NewScheduler()
 	now := time.Now()
-	task := &Task{
+	task := &model.Task{
 		ID:          "test-task",
 		Name:        "Test Task",
 		Schedule:    "* * * * * *", // Run every second
 		Command:     "echo hello",
 		Description: "A test task",
 		Enabled:     false,
+		Status:      model.StatusPending,
 		LastRun:     now,
 		NextRun:     now,
 		CreatedAt:   now,
@@ -91,13 +94,14 @@ func TestAddGetTask(t *testing.T) {
 
 func TestAddDuplicateTask(t *testing.T) {
 	s := NewScheduler()
-	task := &Task{
+	task := &model.Task{
 		ID:          "test-task",
 		Name:        "Test Task",
 		Schedule:    "* * * * * *",
 		Command:     "echo hello",
 		Description: "A test task",
 		Enabled:     false,
+		Status:      model.StatusPending,
 	}
 
 	// Add the task
@@ -115,15 +119,17 @@ func TestAddDuplicateTask(t *testing.T) {
 
 func TestListTasks(t *testing.T) {
 	s := NewScheduler()
-	task1 := &Task{
+	task1 := &model.Task{
 		ID:      "task1",
 		Name:    "Task 1",
 		Enabled: false,
+		Status:  model.StatusPending,
 	}
-	task2 := &Task{
+	task2 := &model.Task{
 		ID:      "task2",
 		Name:    "Task 2",
 		Enabled: false,
+		Status:  model.StatusPending,
 	}
 
 	// Add tasks
@@ -139,10 +145,11 @@ func TestListTasks(t *testing.T) {
 
 func TestRemoveTask(t *testing.T) {
 	s := NewScheduler()
-	task := &Task{
+	task := &model.Task{
 		ID:      "test-task",
 		Name:    "Test Task",
 		Enabled: false,
+		Status:  model.StatusPending,
 	}
 
 	// Add the task
@@ -163,26 +170,28 @@ func TestRemoveTask(t *testing.T) {
 
 func TestUpdateTask(t *testing.T) {
 	s := NewScheduler()
-	task := &Task{
+	task := &model.Task{
 		ID:          "test-task",
 		Name:        "Test Task",
 		Schedule:    "* * * * * *",
 		Command:     "echo hello",
 		Description: "A test task",
 		Enabled:     false,
+		Status:      model.StatusPending,
 	}
 
 	// Add the task
 	_ = s.AddTask(task)
 
 	// Update the task
-	updatedTask := &Task{
+	updatedTask := &model.Task{
 		ID:          "test-task",
 		Name:        "Updated Task",
 		Schedule:    "* * * * * *",
 		Command:     "echo updated",
 		Description: "An updated test task",
 		Enabled:     false,
+		Status:      model.StatusPending,
 	}
 
 	err := s.UpdateTask(updatedTask)
@@ -216,13 +225,14 @@ func TestEnableDisableTask(t *testing.T) {
 		}
 	}()
 
-	task := &Task{
+	task := &model.Task{
 		ID:          "test-task",
 		Name:        "Test Task",
 		Schedule:    "* * * * * *", // Run every second
 		Command:     "echo hello",
 		Description: "A test task",
 		Enabled:     false,
+		Status:      model.StatusPending,
 	}
 
 	// Add the task
@@ -284,8 +294,8 @@ func TestNewTask(t *testing.T) {
 		t.Errorf("Expected Enabled to be false, but was %v", task.Enabled)
 	}
 
-	if task.Status != StatusPending.String() {
-		t.Errorf("Expected Status to be %q, but was %q", StatusPending, task.Status)
+	if task.Status != model.StatusPending {
+		t.Errorf("Expected Status to be %q, but was %q", model.StatusPending, task.Status)
 	}
 }
 
@@ -307,23 +317,25 @@ func TestCronExpressionSupport(t *testing.T) {
 	}()
 
 	// Test standard cron expression (every minute)
-	standardTask := &Task{
+	standardTask := &model.Task{
 		ID:          "standard-cron-task",
 		Name:        "Standard Cron Task",
-		Schedule:    "* * * * *", // Run every minute (standard cron format)
-		Command:     "echo standard cron",
+		Schedule:    "*/1 * * * *", // Every minute
+		Command:     "echo running standard cron",
 		Description: "A task using standard cron expression",
 		Enabled:     true,
+		Status:      model.StatusPending,
 	}
 
 	// Test non-standard cron expression (every second)
-	nonStandardTask := &Task{
+	nonStandardTask := &model.Task{
 		ID:          "non-standard-cron-task",
 		Name:        "Non-Standard Cron Task",
-		Schedule:    "* * * * * *", // Run every second (non-standard cron format with seconds)
-		Command:     "echo non-standard cron",
+		Schedule:    "*/1 * * * * *", // Every second
+		Command:     "echo running non-standard cron",
 		Description: "A task using non-standard cron expression with seconds",
 		Enabled:     true,
+		Status:      model.StatusPending,
 	}
 
 	// Add the tasks
@@ -342,16 +354,16 @@ func TestCronExpressionSupport(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to get standard task: %v", err)
 	}
-	if standardRetrieved.Schedule != "* * * * *" {
-		t.Errorf("Expected standard schedule '* * * * *', got %s", standardRetrieved.Schedule)
+	if standardRetrieved.Schedule != "*/1 * * * *" {
+		t.Errorf("Expected standard schedule '*/1 * * * *', got %s", standardRetrieved.Schedule)
 	}
 
 	nonStandardRetrieved, err := s.GetTask("non-standard-cron-task")
 	if err != nil {
 		t.Fatalf("Failed to get non-standard task: %v", err)
 	}
-	if nonStandardRetrieved.Schedule != "* * * * * *" {
-		t.Errorf("Expected non-standard schedule '* * * * * *', got %s", nonStandardRetrieved.Schedule)
+	if nonStandardRetrieved.Schedule != "*/1 * * * * *" {
+		t.Errorf("Expected non-standard schedule '*/1 * * * * *', got %s", nonStandardRetrieved.Schedule)
 	}
 
 	// Verify both tasks are enabled
@@ -382,20 +394,22 @@ func TestTaskExecutorPattern(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Set up execution tracking
-	var taskExecuted bool
-	var executedTaskID string
+	// Create a variable to track if the task was executed
+	taskExecuted := false
+	executedTaskID := ""
 
 	// Create a mock executor that records execution
 	mockExecutor := &MockTaskExecutor{
-		ExecuteTaskFunc: func(task *Task) error {
+		ExecuteFunc: func(ctx context.Context, task *model.Task, timeout time.Duration) error {
 			taskExecuted = true
+
+			// Get task ID from the task
 			executedTaskID = task.ID
 			return nil
 		},
 	}
 
-	// Set the mock executor
+	// Set the executor
 	s.SetTaskExecutor(mockExecutor)
 
 	// Start the scheduler
@@ -407,13 +421,14 @@ func TestTaskExecutorPattern(t *testing.T) {
 	}()
 
 	// Create a task that will run immediately
-	task := &Task{
+	task := &model.Task{
 		ID:          "test-executor-task",
 		Name:        "Test Executor Task",
 		Schedule:    "* * * * * *", // Run every second
 		Command:     "echo test",
 		Description: "A task for testing the executor pattern",
 		Enabled:     true,
+		Status:      model.StatusPending,
 	}
 
 	// Add the task
@@ -438,7 +453,7 @@ func TestTaskExecutorPattern(t *testing.T) {
 	// Test error handling from TaskExecutor
 	// Set up a mock executor that returns an error
 	errorExecutor := &MockTaskExecutor{
-		ExecuteTaskFunc: func(task *Task) error {
+		ExecuteFunc: func(ctx context.Context, task *model.Task, timeout time.Duration) error {
 			return fmt.Errorf("test error from executor")
 		},
 	}
@@ -453,13 +468,14 @@ func TestTaskExecutorPattern(t *testing.T) {
 	s.Start(ctx)
 
 	// Create a new task
-	errorTask := &Task{
+	errorTask := &model.Task{
 		ID:          "test-error-task",
 		Name:        "Test Error Task",
 		Schedule:    "* * * * * *", // Run every second
 		Command:     "echo error test",
 		Description: "A task for testing error handling",
 		Enabled:     true,
+		Status:      model.StatusPending,
 	}
 
 	// Add the task
@@ -478,8 +494,8 @@ func TestTaskExecutorPattern(t *testing.T) {
 	}
 
 	// Verify the task status was updated to failed
-	if retrievedTask.Status != StatusFailed.String() {
-		t.Errorf("Expected status %s, got %s", StatusFailed.String(), retrievedTask.Status)
+	if retrievedTask.Status != model.StatusFailed {
+		t.Errorf("Expected status %s, got %s", model.StatusFailed, retrievedTask.Status)
 	}
 }
 
@@ -498,13 +514,14 @@ func TestMissingTaskExecutor(t *testing.T) {
 	}(s)
 
 	// Create a task
-	task := &Task{
+	task := &model.Task{
 		ID:          "missing-executor-task",
 		Name:        "Missing Executor Task",
 		Schedule:    "* * * * * *",
 		Command:     "echo test",
 		Description: "A task for testing missing executor",
 		Enabled:     true,
+		Status:      model.StatusPending,
 	}
 
 	// Try to add the task - this should fail because we enabled the task but didn't set an executor
@@ -525,5 +542,11 @@ func TestMissingTaskExecutor(t *testing.T) {
 	err = s.EnableTask(task.ID)
 	if err == nil {
 		t.Error("Expected EnableTask to fail with no executor, but it succeeded")
+	}
+
+	// In TestMissingTaskExecutor, update this check:
+	if task.Status != model.StatusFailed {
+		t.Errorf("Expected task status to be %s after error, got %s",
+			model.StatusFailed, task.Status)
 	}
 }
