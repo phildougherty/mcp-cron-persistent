@@ -276,6 +276,14 @@ func (s *MCPServer) handleAddTask(request *protocol.CallToolRequest) (*protocol.
 		return createErrorResponse(err)
 	}
 
+	// API-level validation requires all fields needed for both scheduling AND execution:
+	// - Name: For identification and display purposes
+	// - Schedule: Required by the scheduler to determine when to run the task
+	// - Command: Required by the executor to know what to execute
+	if params.Name == "" || params.Schedule == "" || params.Command == "" {
+		return createErrorResponse(errors.InvalidInput("missing required fields: name, schedule, and command are required"))
+	}
+
 	s.logger.Debugf("Handling add_task request for task %s", params.Name)
 
 	// Create task
@@ -309,6 +317,16 @@ func (s *MCPServer) handleAddAITask(request *protocol.CallToolRequest) (*protoco
 
 	if err := extractParams(request, &params); err != nil {
 		return createErrorResponse(err)
+	}
+
+	// API-level validation requires all fields needed for both scheduling AND execution:
+	// - Name: For identification and display purposes
+	// - Schedule: Required by the scheduler to determine when to run the task
+	// - Prompt: Required by the executor to know what to execute
+	//
+	// Note that at runtime, the AgentExecutor only validates ID and Prompt
+	if params.Name == "" || params.Schedule == "" || params.Prompt == "" {
+		return createErrorResponse(errors.InvalidInput("missing required fields: name, schedule, and prompt are required"))
 	}
 
 	s.logger.Debugf("Handling add_ai_task request for task %s", params.Name)

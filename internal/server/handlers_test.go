@@ -8,6 +8,7 @@ import (
 
 	"github.com/jolks/mcp-cron/internal/agent"
 	"github.com/jolks/mcp-cron/internal/command"
+	"github.com/jolks/mcp-cron/internal/config"
 	"github.com/jolks/mcp-cron/internal/logging"
 	"github.com/jolks/mcp-cron/internal/model"
 	"github.com/jolks/mcp-cron/internal/scheduler"
@@ -19,9 +20,12 @@ func TestTaskExecutorImplementation(t *testing.T) {
 	// Create a mock scheduler
 	sched := scheduler.NewScheduler()
 
+	// Create a config for testing
+	cfg := config.DefaultConfig()
+
 	// Create executors
 	cmdExec := command.NewCommandExecutor()
-	agentExec := agent.NewAgentExecutor()
+	agentExec := agent.NewAgentExecutor(cfg)
 
 	// Create a logger
 	logger := logging.New(logging.Options{
@@ -74,8 +78,9 @@ func TestTaskExecutorImplementation(t *testing.T) {
 	}
 
 	// Verify the task was added
-	if len(sched.ListTasks()) != 1 {
-		t.Errorf("Expected 1 task, got %d", len(sched.ListTasks()))
+	tasks := sched.ListTasks()
+	if len(tasks) != 1 {
+		t.Errorf("Expected 1 task, got %d", len(tasks))
 	}
 
 	// Get the task to ensure it's properly stored

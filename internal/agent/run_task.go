@@ -4,8 +4,8 @@ package agent
 import (
 	"context"
 	"fmt"
-	"os"
 
+	"github.com/jolks/mcp-cron/internal/config"
 	"github.com/jolks/mcp-cron/internal/logging"
 	"github.com/jolks/mcp-cron/internal/model"
 	"github.com/openai/openai-go"
@@ -13,23 +13,22 @@ import (
 )
 
 // RunTask executes an AI task using the OpenAI API
-func RunTask(ctx context.Context, t *model.Task) (string, error) {
+func RunTask(ctx context.Context, t *model.Task, cfg *config.Config) (string, error) {
 	logger := logging.GetDefaultLogger().WithField("task_id", t.ID)
 	logger.Infof("Running AI task: %s", t.Name)
 
 	// Get tools for the AI agent
-	tools, dispatcher, err := buildToolsFromConfig()
+	tools, dispatcher, err := buildToolsFromConfig(cfg)
 	if err != nil {
 		logger.Errorf("Failed to build tools: %v", err)
 		return "", err
 	}
 
 	// Check for API key
-	// TODO: move to config
-	apiKey := os.Getenv("OPENAI_API_KEY")
+	apiKey := cfg.AI.OpenAIAPIKey
 	if apiKey == "" {
-		logger.Errorf("OPENAI_API_KEY environment variable is not set")
-		return "", fmt.Errorf("OPENAI_API_KEY environment variable is not set")
+		logger.Errorf("OpenAI API key is not set in configuration")
+		return "", fmt.Errorf("OpenAI API key is not set in configuration")
 	}
 
 	// Create OpenAI client
@@ -42,8 +41,7 @@ func RunTask(ctx context.Context, t *model.Task) (string, error) {
 	if len(tools) == 0 {
 		logger.Infof("No tools available, using basic chat completion")
 		resp, err := client.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{
-			// TODO: move to config
-			Model:    "gpt-4o",
+			Model:    cfg.AI.Model,
 			Messages: msgs,
 		})
 		if err != nil {
@@ -56,15 +54,13 @@ func RunTask(ctx context.Context, t *model.Task) (string, error) {
 	}
 
 	// Tool-enabled loop
-	// TODO: configurable instead of hardcoded to 20
-	maxIterations := 20
+	maxIterations := cfg.AI.MaxToolIterations
 	logger.Infof("Starting tool-enabled AI task with max %d iterations", maxIterations)
 
 	for i := 0; i < maxIterations; i++ {
 		logger.Debugf("AI task iteration %d", i+1)
 		resp, err := client.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{
-			// TODO: move to config
-			Model:    "gpt-4o",
+			Model:    cfg.AI.Model,
 			Messages: msgs,
 			Tools:    tools,
 		})

@@ -31,6 +31,10 @@ func NewCommandExecutor() *CommandExecutor {
 
 // Execute implements the Task execution for the scheduler
 func (ce *CommandExecutor) Execute(ctx context.Context, task *model.Task, timeout time.Duration) error {
+	// Runtime validation only checks fields needed for execution (ID and Command)
+	// Schedule is validated at the API level but not required here because:
+	// - The scheduler has already used the schedule to determine when to run the task
+	// - Execution only needs the task ID and the command to execute
 	if task.ID == "" || task.Command == "" {
 		return fmt.Errorf("invalid task: missing ID or Command")
 	}

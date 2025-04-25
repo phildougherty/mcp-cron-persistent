@@ -18,6 +18,9 @@ type successResponse struct {
 }
 
 // extractParams extracts and validates parameters from a request
+// This function handles the basic JSON unmarshaling of request parameters
+// but does not perform domain-specific validation (e.g., required fields)
+// which should be done by the individual handlers
 func extractParams(request *protocol.CallToolRequest, params interface{}) error {
 	if err := utils.JsonUnmarshal(request.RawArguments, params); err != nil {
 		return errors.InvalidInput(fmt.Sprintf("invalid parameters: %v", err))

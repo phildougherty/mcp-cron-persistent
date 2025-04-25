@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jolks/mcp-cron/internal/config"
 	"github.com/jolks/mcp-cron/internal/model"
 )
 
@@ -16,18 +17,24 @@ import (
 type AgentExecutor struct {
 	mu      sync.Mutex
 	results map[string]*model.Result // Map of taskID -> Result
+	config  *config.Config
 	// We'll add agent-specific fields here
 }
 
 // NewAgentExecutor creates a new agent executor
-func NewAgentExecutor() *AgentExecutor {
+func NewAgentExecutor(cfg *config.Config) *AgentExecutor {
 	return &AgentExecutor{
 		results: make(map[string]*model.Result),
+		config:  cfg,
 	}
 }
 
 // Execute implements the Task execution for the scheduler
 func (ae *AgentExecutor) Execute(ctx context.Context, task *model.Task, timeout time.Duration) error {
+	// Runtime validation only checks fields needed for execution (ID and Prompt)
+	// Schedule is validated at the API level but not required here because:
+	// - The scheduler has already used the schedule to determine when to run the task
+	// - Execution only needs the task ID and the content to execute
 	if task.ID == "" || task.Prompt == "" {
 		return fmt.Errorf("invalid task: missing ID or Prompt")
 	}
@@ -70,7 +77,7 @@ func (ae *AgentExecutor) ExecuteAgentTask(
 	}
 
 	// Execute the task using RunTask
-	output, err := RunTask(execCtx, task)
+	output, err := RunTask(execCtx, task, ae.config)
 
 	// Update result fields
 	result.EndTime = time.Now()

@@ -24,7 +24,6 @@ func TestNewMCPServer(t *testing.T) {
 	// Create dependencies
 	sched := scheduler.NewScheduler()
 	exec := command.NewCommandExecutor()
-	agentExec := agent.NewAgentExecutor()
 
 	// Test with proper config values
 	cfg := &config.Config{
@@ -34,6 +33,8 @@ func TestNewMCPServer(t *testing.T) {
 			TransportMode: "sse",
 		},
 	}
+
+	agentExec := agent.NewAgentExecutor(cfg)
 	server, err := NewMCPServer(cfg, sched, exec, agentExec)
 	if err != nil {
 		t.Fatalf("Failed to create server with default config: %v", err)
@@ -57,7 +58,6 @@ func TestNewMCPServerWithCustomConfig(t *testing.T) {
 	// Create dependencies
 	sched := scheduler.NewScheduler()
 	exec := command.NewCommandExecutor()
-	agentExec := agent.NewAgentExecutor()
 
 	// Test with custom config
 	cfg := &config.Config{
@@ -68,6 +68,7 @@ func TestNewMCPServerWithCustomConfig(t *testing.T) {
 		},
 	}
 
+	agentExec := agent.NewAgentExecutor(cfg)
 	server, err := NewMCPServer(cfg, sched, exec, agentExec)
 	if err != nil {
 		t.Fatalf("Failed to create server with custom config: %v", err)
@@ -91,7 +92,6 @@ func TestMCPServerStartStop(t *testing.T) {
 	// Create dependencies
 	sched := scheduler.NewScheduler()
 	exec := command.NewCommandExecutor()
-	agentExec := agent.NewAgentExecutor()
 
 	// Create server with stdio transport to avoid network binding
 	cfg := &config.Config{
@@ -100,6 +100,7 @@ func TestMCPServerStartStop(t *testing.T) {
 		},
 	}
 
+	agentExec := agent.NewAgentExecutor(cfg)
 	server, err := NewMCPServer(cfg, sched, exec, agentExec)
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
@@ -133,7 +134,6 @@ func TestTaskHandlers(t *testing.T) {
 	// Create dependencies
 	sched := scheduler.NewScheduler()
 	exec := command.NewCommandExecutor()
-	agentExec := agent.NewAgentExecutor()
 
 	// Create server with stdio transport to avoid network binding
 	cfg := &config.Config{
@@ -142,6 +142,7 @@ func TestTaskHandlers(t *testing.T) {
 		},
 	}
 
+	agentExec := agent.NewAgentExecutor(cfg)
 	server, err := NewMCPServer(cfg, sched, exec, agentExec)
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
@@ -163,7 +164,6 @@ func TestTaskCreationTimeFields(t *testing.T) {
 	defer cancel()
 
 	exec := command.NewCommandExecutor()
-	agentExec := agent.NewAgentExecutor()
 
 	// Create server
 	cfg := &config.Config{
@@ -172,6 +172,7 @@ func TestTaskCreationTimeFields(t *testing.T) {
 		},
 	}
 
+	agentExec := agent.NewAgentExecutor(cfg)
 	server, err := NewMCPServer(cfg, sched, exec, agentExec)
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
@@ -247,7 +248,6 @@ func TestLogFilePath(t *testing.T) {
 	// Create dependencies
 	sched := scheduler.NewScheduler()
 	exec := command.NewCommandExecutor()
-	agentExec := agent.NewAgentExecutor()
 
 	// Create a test logger to capture log messages
 	var logBuffer bytes.Buffer
@@ -280,6 +280,7 @@ func TestLogFilePath(t *testing.T) {
 		},
 	}
 
+	agentExec := agent.NewAgentExecutor(cfg)
 	_, err = NewMCPServer(cfg, sched, exec, agentExec)
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
@@ -299,7 +300,11 @@ func TestTaskTypeHandling(t *testing.T) {
 	// Create dependencies
 	sched := scheduler.NewScheduler()
 	cmdExec := command.NewCommandExecutor()
-	agentExec := agent.NewAgentExecutor()
+
+	// Create a config for testing
+	cfg := config.DefaultConfig()
+
+	agentExec := agent.NewAgentExecutor(cfg)
 
 	// Create a logger
 	logger := logging.New(logging.Options{

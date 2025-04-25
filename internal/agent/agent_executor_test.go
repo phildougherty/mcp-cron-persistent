@@ -8,19 +8,23 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jolks/mcp-cron/internal/config"
 	"github.com/jolks/mcp-cron/internal/model"
 )
 
 // TestAgentExecutor is a test structure with a mockable RunTask function
 type TestAgentExecutor struct {
 	*AgentExecutor
-	mockRunTask func(ctx context.Context, t *model.Task) (string, error)
+	mockRunTask func(ctx context.Context, t *model.Task, cfg *config.Config) (string, error)
 }
 
 // NewTestAgentExecutor creates a test executor with a mockable RunTask function
-func NewTestAgentExecutor(mockFunc func(ctx context.Context, t *model.Task) (string, error)) *TestAgentExecutor {
+func NewTestAgentExecutor(mockFunc func(ctx context.Context, t *model.Task, cfg *config.Config) (string, error)) *TestAgentExecutor {
+	// Create a default config for testing
+	cfg := config.DefaultConfig()
+
 	return &TestAgentExecutor{
-		AgentExecutor: NewAgentExecutor(),
+		AgentExecutor: NewAgentExecutor(cfg),
 		mockRunTask:   mockFunc,
 	}
 }
@@ -54,7 +58,7 @@ func (tae *TestAgentExecutor) ExecuteAgentTask(
 	}
 
 	// Execute the task using the mock function
-	output, err := tae.mockRunTask(execCtx, task)
+	output, err := tae.mockRunTask(execCtx, task, tae.config)
 
 	// Update result fields
 	result.EndTime = time.Now()
@@ -77,7 +81,7 @@ func TestExecuteAgentTask(t *testing.T) {
 	mockOutput := "This is a test result from the AI agent"
 
 	// Create test executor with mock function
-	executor := NewTestAgentExecutor(func(ctx context.Context, task *model.Task) (string, error) {
+	executor := NewTestAgentExecutor(func(ctx context.Context, task *model.Task, cfg *config.Config) (string, error) {
 		// Verify that the task has the expected fields
 		if task.ID != "test-task-id" {
 			t.Errorf("Expected task ID 'test-task-id', got '%s'", task.ID)
@@ -124,7 +128,7 @@ func TestExecuteAgentTaskWithError(t *testing.T) {
 	mockError := "test error from AI agent"
 
 	// Create test executor with mock function that returns an error
-	executor := NewTestAgentExecutor(func(ctx context.Context, task *model.Task) (string, error) {
+	executor := NewTestAgentExecutor(func(ctx context.Context, task *model.Task, cfg *config.Config) (string, error) {
 		return "", fmt.Errorf(mockError)
 	})
 
@@ -166,7 +170,7 @@ func TestExecute(t *testing.T) {
 	mockOutput := "Test output from Execute"
 
 	// Create test executor with mock function
-	testExecutor := NewTestAgentExecutor(func(ctx context.Context, task *model.Task) (string, error) {
+	testExecutor := NewTestAgentExecutor(func(ctx context.Context, task *model.Task, cfg *config.Config) (string, error) {
 		return mockOutput, nil
 	})
 
@@ -197,16 +201,19 @@ func TestExecute(t *testing.T) {
 	}
 }
 
-// Optional: Integration test that actually calls the OpenAI API
-// This test is skipped by default and only runs when explicitly enabled
+// TestRunTaskIntegration updates the integration test to use config
 func TestRunTaskIntegration(t *testing.T) {
 	// Skip by default to avoid making actual API calls during routine testing
-	if os.Getenv("ENABLE_OPENAI_TESTS") != "true" {
-		t.Skip("Skipping OpenAI integration test. Set ENABLE_OPENAI_TESTS=true to run.")
+	if os.Getenv("MCP_CRON_ENABLE_OPENAI_TESTS") != "true" {
+		t.Skip("Skipping OpenAI integration test. Set MCP_CRON_ENABLE_OPENAI_TESTS=true to run.")
 	}
 
-	// Check for API key
-	if os.Getenv("OPENAI_API_KEY") == "" {
+	// Create a default config for testing
+	cfg := config.DefaultConfig()
+
+	// Set the API key from environment for the test
+	cfg.AI.OpenAIAPIKey = os.Getenv("OPENAI_API_KEY")
+	if cfg.AI.OpenAIAPIKey == "" {
 		t.Skip("OPENAI_API_KEY environment variable not set")
 	}
 
@@ -220,7 +227,7 @@ func TestRunTaskIntegration(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	output, err := RunTask(ctx, task)
+	output, err := RunTask(ctx, task, cfg)
 	if err != nil {
 		t.Fatalf("RunTask failed: %v", err)
 	}

@@ -91,6 +91,9 @@ The following command line arguments are supported:
 | `--log-level` | Logging level: `debug`, `info`, `warn`, `error`, `fatal` | `info` |
 | `--log-file` | Log file path | stdout |
 | `--version` | Show version information and exit | `false` |
+| `--ai-model` | AI model to use for AI tasks | `gpt-4o` |
+| `--ai-max-iterations` | Maximum iterations for tool-enabled AI tasks | `20` |
+| `--mcp-config-path` | Path to MCP configuration file | `~/.cursor/mcp.json` |
 
 ### Environment Variables
 
@@ -98,18 +101,21 @@ The following environment variables are supported:
 
 | Environment Variable | Description | Default |
 |----------------------|-------------|---------|
-| `MCP_SERVER_ADDRESS` | The address to bind the server to | `localhost` |
-| `MCP_SERVER_PORT` | The port to bind the server to | `8080` |
-| `MCP_SERVER_TRANSPORT` | Transport mode: `sse` or `stdio` | `sse` |
-| `MCP_SERVER_NAME` | Server name | `mcp-cron` |
-| `MCP_SERVER_VERSION` | Server version | `0.1.0` |
-| `MCP_SCHEDULER_MAX_CONCURRENT` | Maximum concurrent tasks | `5` |
-| `MCP_SCHEDULER_DEFAULT_TIMEOUT` | Default timeout for task execution | `10m` |
-| `MCP_SCHEDULER_EXECUTION_DIR` | Directory where tasks are executed | `./` |
-| `MCP_LOGGING_LEVEL` | Logging level: `debug`, `info`, `warn`, `error`, `fatal` | `info` |
-| `MCP_LOGGING_FILE` | Log file path | stdout |
+| `MCP_CRON_SERVER_ADDRESS` | The address to bind the server to | `localhost` |
+| `MCP_CRON_SERVER_PORT` | The port to bind the server to | `8080` |
+| `MCP_CRON_SERVER_TRANSPORT` | Transport mode: `sse` or `stdio` | `sse` |
+| `MCP_CRON_SERVER_NAME` | Server name | `mcp-cron` |
+| `MCP_CRON_SERVER_VERSION` | Server version | `0.1.0` |
+| `MCP_CRON_SCHEDULER_MAX_CONCURRENT` | Maximum concurrent tasks | `5` |
+| `MCP_CRON_SCHEDULER_DEFAULT_TIMEOUT` | Default timeout for task execution | `10m` |
+| `MCP_CRON_SCHEDULER_EXECUTION_DIR` | Directory where tasks are executed | `./` |
+| `MCP_CRON_LOGGING_LEVEL` | Logging level: `debug`, `info`, `warn`, `error`, `fatal` | `info` |
+| `MCP_CRON_LOGGING_FILE` | Log file path | stdout |
 | `OPENAI_API_KEY` | OpenAI API key for AI tasks | Not set |
-| `ENABLE_OPENAI_TESTS` | Enable OpenAI integration tests | `false` |
+| `MCP_CRON_ENABLE_OPENAI_TESTS` | Enable OpenAI integration tests | `false` |
+| `MCP_CRON_AI_MODEL` | LLM model to use for AI tasks | `gpt-4o` |
+| `MCP_CRON_AI_MAX_TOOL_ITERATIONS` | Maximum iterations for tool-enabled tasks | `20` |
+| `MCP_CRON_MCP_CONFIG_FILE_PATH` | Path to MCP configuration file | `~/.cursor/mcp.json` |
 
 ### Logging
 

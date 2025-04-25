@@ -5,19 +5,18 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
-	"os"
-	"path/filepath"
-
 	"github.com/ThinkInAIXYZ/go-mcp/client"
 	"github.com/ThinkInAIXYZ/go-mcp/protocol"
 	"github.com/ThinkInAIXYZ/go-mcp/transport"
+	"github.com/jolks/mcp-cron/internal/config"
 	"github.com/openai/openai-go"
+	"log"
+	"os"
 )
 
 type toolCaller func(context.Context, openai.ChatCompletionMessageToolCall) (string, error)
 
-func buildToolsFromConfig() ([]openai.ChatCompletionToolParam, toolCaller, error) {
+func buildToolsFromConfig(sysCfg *config.Config) ([]openai.ChatCompletionToolParam, toolCaller, error) {
 	// Parse the config file
 	// TODO: support Env
 	var cfg struct {
@@ -27,8 +26,7 @@ func buildToolsFromConfig() ([]openai.ChatCompletionToolParam, toolCaller, error
 			URL     string   `json:"url,omitempty"`
 		} `json:"mcpServers"`
 	}
-	// TODO: read from env var or default to ~/.cursor/mcp.json
-	raw, err := os.ReadFile(filepath.Join(os.Getenv("HOME"), ".cursor", "mcp.json"))
+	raw, err := os.ReadFile(sysCfg.AI.MCPConfigFilePath)
 	if err != nil {
 		return nil, nil, err
 	}
