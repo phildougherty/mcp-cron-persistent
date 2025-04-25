@@ -14,7 +14,7 @@ Model Context Protocol (MCP) server for scheduling and managing tasks through a 
 ### Building from Source
 
 #### Prerequisites
-- Go 1.22.2 or higher
+- Go 1.23.0 or higher
 
 ```bash
 # Clone the repository

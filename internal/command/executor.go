@@ -42,7 +42,7 @@ func (ce *CommandExecutor) Execute(ctx context.Context, task *model.Task, timeou
 	// Execute the command
 	result := ce.ExecuteCommand(ctx, task.ID, task.Command, timeout)
 	if result.Error != "" {
-		return fmt.Errorf("%s", result.Error)
+		return fmt.Errorf(result.Error)
 	}
 
 	return nil

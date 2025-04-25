@@ -42,7 +42,7 @@ func (ae *AgentExecutor) Execute(ctx context.Context, task *model.Task, timeout 
 	// Execute the command
 	result := ae.ExecuteAgentTask(ctx, task.ID, task.Prompt, timeout)
 	if result.Error != "" {
-		return fmt.Errorf("%s", result.Error)
+		return fmt.Errorf(result.Error)
 	}
 
 	return nil

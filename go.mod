@@ -1,6 +1,8 @@
 module github.com/jolks/mcp-cron
 
-go 1.22.2
+go 1.23.0
+
+toolchain go1.23.8
 
 require (
 	github.com/ThinkInAIXYZ/go-mcp v0.1.14

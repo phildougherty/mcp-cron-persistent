@@ -3,6 +3,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"testing"
@@ -129,7 +130,7 @@ func TestExecuteAgentTaskWithError(t *testing.T) {
 
 	// Create test executor with mock function that returns an error
 	executor := NewTestAgentExecutor(func(ctx context.Context, task *model.Task, cfg *config.Config) (string, error) {
-		return "", fmt.Errorf(mockError)
+		return "", errors.New(mockError)
 	})
 
 	// Set up test parameters
@@ -159,7 +160,7 @@ func (tae *TestAgentExecutor) Execute(ctx context.Context, task *model.Task, tim
 	// Use our overridden ExecuteAgentTask
 	result := tae.ExecuteAgentTask(ctx, task.ID, task.Prompt, timeout)
 	if result.Error != "" {
-		return fmt.Errorf("%s", result.Error)
+		return fmt.Errorf(result.Error)
 	}
 
 	return nil
