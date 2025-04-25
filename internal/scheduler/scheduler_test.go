@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jolks/mcp-cron/internal/config"
 	"github.com/jolks/mcp-cron/internal/model"
 )
 
@@ -23,8 +24,16 @@ func (m *MockTaskExecutor) Execute(ctx context.Context, task *model.Task, timeou
 	return nil
 }
 
+// createTestConfig creates a default config for testing
+func createTestConfig() *config.SchedulerConfig {
+	return &config.SchedulerConfig{
+		DefaultTimeout: 10 * time.Minute,
+	}
+}
+
 func TestNewScheduler(t *testing.T) {
-	s := NewScheduler()
+	cfg := createTestConfig()
+	s := NewScheduler(cfg)
 	if s == nil {
 		t.Fatal("NewScheduler() returned nil")
 	}
@@ -40,7 +49,8 @@ func TestNewScheduler(t *testing.T) {
 }
 
 func TestAddGetTask(t *testing.T) {
-	s := NewScheduler()
+	cfg := createTestConfig()
+	s := NewScheduler(cfg)
 	now := time.Now()
 	task := &model.Task{
 		ID:          "test-task",
@@ -93,7 +103,8 @@ func TestAddGetTask(t *testing.T) {
 }
 
 func TestAddDuplicateTask(t *testing.T) {
-	s := NewScheduler()
+	cfg := createTestConfig()
+	s := NewScheduler(cfg)
 	task := &model.Task{
 		ID:          "test-task",
 		Name:        "Test Task",
@@ -118,7 +129,8 @@ func TestAddDuplicateTask(t *testing.T) {
 }
 
 func TestListTasks(t *testing.T) {
-	s := NewScheduler()
+	cfg := createTestConfig()
+	s := NewScheduler(cfg)
 	task1 := &model.Task{
 		ID:      "task1",
 		Name:    "Task 1",
@@ -144,7 +156,8 @@ func TestListTasks(t *testing.T) {
 }
 
 func TestRemoveTask(t *testing.T) {
-	s := NewScheduler()
+	cfg := createTestConfig()
+	s := NewScheduler(cfg)
 	task := &model.Task{
 		ID:      "test-task",
 		Name:    "Test Task",
@@ -169,7 +182,8 @@ func TestRemoveTask(t *testing.T) {
 }
 
 func TestUpdateTask(t *testing.T) {
-	s := NewScheduler()
+	cfg := createTestConfig()
+	s := NewScheduler(cfg)
 	task := &model.Task{
 		ID:          "test-task",
 		Name:        "Test Task",
@@ -210,7 +224,8 @@ func TestUpdateTask(t *testing.T) {
 }
 
 func TestEnableDisableTask(t *testing.T) {
-	s := NewScheduler()
+	cfg := createTestConfig()
+	s := NewScheduler(cfg)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -301,7 +316,8 @@ func TestNewTask(t *testing.T) {
 
 // TestCronExpressionSupport confirms that both standard (minute-based) and non-standard (second-based) cron expressions are supported
 func TestCronExpressionSupport(t *testing.T) {
-	s := NewScheduler()
+	cfg := createTestConfig()
+	s := NewScheduler(cfg)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -390,7 +406,8 @@ func TestCronExpressionSupport(t *testing.T) {
 
 // TestTaskExecutorPattern tests the direct execution of tasks using the TaskExecutor interface
 func TestTaskExecutorPattern(t *testing.T) {
-	s := NewScheduler()
+	cfg := createTestConfig()
+	s := NewScheduler(cfg)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -463,7 +480,7 @@ func TestTaskExecutorPattern(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to stop scheduler: %v", err)
 	}
-	s = NewScheduler()
+	s = NewScheduler(cfg)
 	s.SetTaskExecutor(errorExecutor)
 	s.Start(ctx)
 
@@ -501,7 +518,8 @@ func TestTaskExecutorPattern(t *testing.T) {
 
 // TestMissingTaskExecutor verifies that the scheduler fails to schedule tasks if no executor is set
 func TestMissingTaskExecutor(t *testing.T) {
-	s := NewScheduler()
+	cfg := createTestConfig()
+	s := NewScheduler(cfg)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 

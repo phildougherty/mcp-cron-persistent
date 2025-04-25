@@ -11,16 +11,7 @@ import (
 	"github.com/jolks/mcp-cron/internal/utils"
 )
 
-// Standard response structures
-type successResponse struct {
-	Success bool   `json:"success"`
-	Message string `json:"message"`
-}
-
-// extractParams extracts and validates parameters from a request
-// This function handles the basic JSON unmarshaling of request parameters
-// but does not perform domain-specific validation (e.g., required fields)
-// which should be done by the individual handlers
+// extractParams extracts parameters from a tool request
 func extractParams(request *protocol.CallToolRequest, params interface{}) error {
 	if err := utils.JsonUnmarshal(request.RawArguments, params); err != nil {
 		return errors.InvalidInput(fmt.Sprintf("invalid parameters: %v", err))
@@ -28,25 +19,25 @@ func extractParams(request *protocol.CallToolRequest, params interface{}) error 
 	return nil
 }
 
-// extractTaskIDParam is a helper to extract and validate a task ID parameter
+// extractTaskIDParam extracts the task ID parameter from a request
 func extractTaskIDParam(request *protocol.CallToolRequest) (string, error) {
-	var params struct {
-		ID string `json:"id"`
-	}
+	var params TaskIDParams
 	if err := extractParams(request, &params); err != nil {
 		return "", err
 	}
+
 	if params.ID == "" {
-		return "", errors.InvalidInput("missing required parameter: id")
+		return "", errors.InvalidInput("task ID is required")
 	}
+
 	return params.ID, nil
 }
 
-// createSuccessResponse creates a standardized success response
+// createSuccessResponse creates a success response
 func createSuccessResponse(message string) (*protocol.CallToolResult, error) {
-	response := successResponse{
-		Success: true,
-		Message: message,
+	response := map[string]interface{}{
+		"success": true,
+		"message": message,
 	}
 
 	responseJSON, err := json.Marshal(response)
@@ -64,14 +55,14 @@ func createSuccessResponse(message string) (*protocol.CallToolResult, error) {
 	}, nil
 }
 
-// createErrorResponse creates a standardized error response
+// createErrorResponse creates an error response
 func createErrorResponse(err error) (*protocol.CallToolResult, error) {
 	// Always return the original error as the second return value
 	// This ensures MCP protocol error handling works correctly
 	return nil, err
 }
 
-// createTaskResponse creates a response containing a task
+// createTaskResponse creates a response with a single task
 func createTaskResponse(task *model.Task) (*protocol.CallToolResult, error) {
 	taskJSON, err := json.Marshal(task)
 	if err != nil {
@@ -88,7 +79,7 @@ func createTaskResponse(task *model.Task) (*protocol.CallToolResult, error) {
 	}, nil
 }
 
-// createTasksResponse creates a response containing multiple tasks
+// createTasksResponse creates a response with multiple tasks
 func createTasksResponse(tasks []*model.Task) (*protocol.CallToolResult, error) {
 	tasksJSON, err := json.Marshal(tasks)
 	if err != nil {
@@ -103,4 +94,38 @@ func createTasksResponse(tasks []*model.Task) (*protocol.CallToolResult, error) 
 			},
 		},
 	}, nil
+}
+
+// validateTaskParams validates the common task parameters
+func validateTaskParams(name, schedule string) error {
+	if name == "" || schedule == "" {
+		return errors.InvalidInput("missing required fields: name and schedule are required")
+	}
+	return nil
+}
+
+// validateShellTaskParams validates the parameters specific to shell tasks
+func validateShellTaskParams(name, schedule, command string) error {
+	if err := validateTaskParams(name, schedule); err != nil {
+		return err
+	}
+
+	if command == "" {
+		return errors.InvalidInput("missing required field: command is required for shell tasks")
+	}
+
+	return nil
+}
+
+// validateAITaskParams validates the parameters specific to AI tasks
+func validateAITaskParams(name, schedule, prompt string) error {
+	if err := validateTaskParams(name, schedule); err != nil {
+		return err
+	}
+
+	if prompt == "" {
+		return errors.InvalidInput("missing required field: prompt is required for AI tasks")
+	}
+
+	return nil
 }

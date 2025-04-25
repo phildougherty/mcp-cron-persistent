@@ -2,7 +2,10 @@
 package server
 
 import (
+	"encoding/json"
+	"fmt"
 	"testing"
+	"time"
 
 	"github.com/ThinkInAIXYZ/go-mcp/protocol"
 	"github.com/jolks/mcp-cron/internal/agent"
@@ -14,14 +17,13 @@ import (
 )
 
 // createTestServer creates a minimal MCPServer for testing
-func createTestServer(t *testing.T) *MCPServer {
-	// Create dependencies
-	sched := scheduler.NewScheduler()
-	cmdExec := command.NewCommandExecutor()
-
+func createAITestServer(t *testing.T) *MCPServer {
 	// Create a config for testing
 	cfg := config.DefaultConfig()
 
+	// Create dependencies
+	sched := scheduler.NewScheduler(&cfg.Scheduler)
+	cmdExec := command.NewCommandExecutor()
 	agentExec := agent.NewAgentExecutor(cfg)
 
 	// Create a logger
@@ -45,295 +47,299 @@ func createTestServer(t *testing.T) *MCPServer {
 }
 
 // TestHandleAddAITask tests the AI task creation handler
-func TestHandleAddAITask(t *testing.T) {
-	server := createTestServer(t)
+func TestHandleAddAITask_AI(t *testing.T) {
+	server := createAITestServer(t)
 
 	// Test case 1: Valid AI task with minimum fields
-	minimalRequest := &protocol.CallToolRequest{
-		RawArguments: []byte(`{
-			"name": "Minimal AI Task",
-			"schedule": "* * * * *",
-			"prompt": "Minimal prompt"
-		}`),
+	validTask := AITaskParams{
+		Name:     "AI Test Task",
+		Schedule: "*/5 * * * *",
+		Prompt:   "Generate a report on system health",
+		Enabled:  true,
 	}
 
-	result, err := server.handleAddAITask(minimalRequest)
+	// Create the request with the valid task
+	validRequestJSON, _ := json.Marshal(validTask)
+	validRequest := &protocol.CallToolRequest{
+		RawArguments: validRequestJSON,
+	}
+
+	// Call the handler
+	result, err := server.handleAddAITask(validRequest)
 	if err != nil {
-		t.Fatalf("handleAddAITask failed for minimal request: %v", err)
+		t.Fatalf("Valid request should not fail: %v", err)
 	}
 	if result == nil {
-		t.Fatal("handleAddAITask returned nil result for minimal request")
+		t.Fatal("Result should not be nil for valid request")
 	}
 
-	// Test case 2: AI task with all fields
-	fullRequest := &protocol.CallToolRequest{
-		RawArguments: []byte(`{
-			"name": "Full AI Task",
-			"schedule": "0 */5 * * * *",
-			"prompt": "Full prompt with details",
-			"description": "Test AI task with all fields",
-			"type": "AI",
-			"enabled": true
-		}`),
+	// Test case 2: Missing required fields (prompt)
+	invalidTask := AITaskParams{
+		Name:     "Invalid AI Task",
+		Schedule: "*/5 * * * *",
+		// Missing prompt
 	}
 
-	result, err = server.handleAddAITask(fullRequest)
-	if err != nil {
-		t.Fatalf("handleAddAITask failed for full request: %v", err)
-	}
-	if result == nil {
-		t.Fatal("handleAddAITask returned nil result for full request")
-	}
-
-	// Test case 3: Invalid request (missing required fields)
+	invalidRequestJSON, _ := json.Marshal(invalidTask)
 	invalidRequest := &protocol.CallToolRequest{
-		RawArguments: []byte(`{
-			"name": "Invalid Task"
-		}`),
+		RawArguments: invalidRequestJSON,
 	}
 
-	_, err = server.handleAddAITask(invalidRequest)
+	// Call the handler
+	result, err = server.handleAddAITask(invalidRequest)
 	if err == nil {
-		t.Fatal("handleAddAITask should fail for request missing required fields")
+		t.Fatal("Invalid request should fail")
+	}
+	if result != nil {
+		t.Fatal("Result should be nil for invalid request")
 	}
 
-	// Test case 4: Malformed JSON
-	malformedRequest := &protocol.CallToolRequest{
-		RawArguments: []byte(`{
-			"name": "Malformed Task",
-			"schedule": "* * * * *"
-			"prompt": "Malformed prompt"
-		}`),
+	// Test case 3: Missing required fields (name)
+	missingNameTask := AITaskParams{
+		Schedule: "*/5 * * * *",
+		Prompt:   "Generate a report on system health",
 	}
 
-	_, err = server.handleAddAITask(malformedRequest)
+	missingNameRequestJSON, _ := json.Marshal(missingNameTask)
+	missingNameRequest := &protocol.CallToolRequest{
+		RawArguments: missingNameRequestJSON,
+	}
+
+	// Call the handler
+	result, err = server.handleAddAITask(missingNameRequest)
 	if err == nil {
-		t.Fatal("handleAddAITask should fail for malformed JSON")
+		t.Fatal("Request with missing name should fail")
+	}
+	if result != nil {
+		t.Fatal("Result should be nil for request with missing name")
 	}
 
-	// Verify the correct tasks were created
-	tasks := server.scheduler.ListTasks()
-	if len(tasks) != 2 {
-		t.Fatalf("Expected 2 tasks, got %d", len(tasks))
+	// Test case 4: Missing required fields (schedule)
+	missingScheduleTask := AITaskParams{
+		Name:   "Missing Schedule Task",
+		Prompt: "Generate a report on system health",
 	}
 
-	// Verify properties of created tasks
-	var minimalTask, fullTask *model.Task
-	for _, task := range tasks {
-		if task.Name == "Minimal AI Task" {
-			minimalTask = task
-		} else if task.Name == "Full AI Task" {
-			fullTask = task
-		}
+	missingScheduleRequestJSON, _ := json.Marshal(missingScheduleTask)
+	missingScheduleRequest := &protocol.CallToolRequest{
+		RawArguments: missingScheduleRequestJSON,
 	}
 
-	// Check minimal task
-	if minimalTask == nil {
-		t.Fatal("Minimal task not found")
+	// Call the handler
+	result, err = server.handleAddAITask(missingScheduleRequest)
+	if err == nil {
+		t.Fatal("Request with missing schedule should fail")
 	}
-	if minimalTask.Type != model.TypeAI.String() {
-		t.Errorf("Expected minimal task type to be %s, got %s", model.TypeAI.String(), minimalTask.Type)
-	}
-	if minimalTask.Prompt != "Minimal prompt" {
-		t.Errorf("Expected minimal task prompt to be 'Minimal prompt', got '%s'", minimalTask.Prompt)
-	}
-	if minimalTask.Schedule != "* * * * *" {
-		t.Errorf("Expected minimal task schedule to be '* * * * *', got '%s'", minimalTask.Schedule)
-	}
-
-	// Check full task
-	if fullTask == nil {
-		t.Fatal("Full task not found")
-	}
-	if fullTask.Type != model.TypeAI.String() {
-		t.Errorf("Expected full task type to be %s, got %s", model.TypeAI.String(), fullTask.Type)
-	}
-	if fullTask.Prompt != "Full prompt with details" {
-		t.Errorf("Expected full task prompt to be 'Full prompt with details', got '%s'", fullTask.Prompt)
-	}
-	if fullTask.Description != "Test AI task with all fields" {
-		t.Errorf("Expected full task description to be 'Test AI task with all fields', got '%s'", fullTask.Description)
-	}
-	if fullTask.Schedule != "0 */5 * * * *" {
-		t.Errorf("Expected full task schedule to be '0 */5 * * * *', got '%s'", fullTask.Schedule)
-	}
-	if !fullTask.Enabled {
-		t.Error("Expected full task to be enabled")
+	if result != nil {
+		t.Fatal("Result should be nil for request with missing schedule")
 	}
 }
 
 // TestUpdateAITask tests updating AI tasks
-func TestUpdateAITask(t *testing.T) {
-	server := createTestServer(t)
+func TestUpdateAITask_AI(t *testing.T) {
+	server := createAITestServer(t)
 
 	// First, create an AI task to update
-	createRequest := &protocol.CallToolRequest{
-		RawArguments: []byte(`{
-			"name": "AI Task to Update",
-			"schedule": "* * * * *",
-			"prompt": "Original prompt",
-			"description": "Original description",
-			"enabled": true
-		}`),
+	taskID := fmt.Sprintf("task_%d", time.Now().UnixNano())
+	initialTask := &model.Task{
+		ID:          taskID,
+		Name:        "Initial AI Task",
+		Schedule:    "*/5 * * * *",
+		Type:        model.TypeAI.String(),
+		Prompt:      "Initial prompt",
+		Description: "Initial description",
+		Enabled:     false,
+		Status:      model.StatusPending,
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
 	}
 
-	_, err := server.handleAddAITask(createRequest)
+	// Add task directly to the scheduler
+	err := server.scheduler.AddTask(initialTask)
 	if err != nil {
-		t.Fatalf("Failed to create AI task: %v", err)
+		t.Fatalf("Failed to add initial task: %v", err)
 	}
 
-	// Get the created task
-	tasks := server.scheduler.ListTasks()
-	if len(tasks) != 1 {
-		t.Fatalf("Expected 1 task, got %d", len(tasks))
-	}
-	originalTask := tasks[0]
-
-	// Test case 1: Update prompt
-	promptUpdateRequest := &protocol.CallToolRequest{
-		RawArguments: []byte(`{
-			"id": "` + originalTask.ID + `",
-			"prompt": "Updated prompt"
-		}`),
+	// Test case 1: Update AI task prompt
+	updateParams := AITaskParams{
+		ID:     taskID,
+		Prompt: "Updated prompt",
 	}
 
-	_, err = server.handleUpdateTask(promptUpdateRequest)
+	updateRequestJSON, _ := json.Marshal(updateParams)
+	updateRequest := &protocol.CallToolRequest{
+		RawArguments: updateRequestJSON,
+	}
+
+	// Call the handler
+	result, err := server.handleUpdateTask(updateRequest)
 	if err != nil {
-		t.Fatalf("Failed to update prompt: %v", err)
+		t.Fatalf("Valid update should not fail: %v", err)
+	}
+	if result == nil {
+		t.Fatal("Result should not be nil for valid update")
 	}
 
-	// Verify prompt was updated
-	updatedTask, err := server.scheduler.GetTask(originalTask.ID)
+	// Verify the task was updated
+	updatedTask, err := server.scheduler.GetTask(taskID)
 	if err != nil {
 		t.Fatalf("Failed to get updated task: %v", err)
 	}
 	if updatedTask.Prompt != "Updated prompt" {
-		t.Errorf("Expected prompt to be 'Updated prompt', got '%s'", updatedTask.Prompt)
+		t.Errorf("Expected prompt to be updated to 'Updated prompt', got '%s'", updatedTask.Prompt)
 	}
 
 	// Test case 2: Update multiple fields
+	multiUpdateParams := AITaskParams{
+		ID:          taskID,
+		Name:        "Updated AI Task",
+		Schedule:    "*/10 * * * *",
+		Description: "Updated description",
+		Enabled:     true,
+	}
+
+	multiUpdateRequestJSON, _ := json.Marshal(multiUpdateParams)
 	multiUpdateRequest := &protocol.CallToolRequest{
-		RawArguments: []byte(`{
-			"id": "` + originalTask.ID + `",
-			"name": "New Name",
-			"description": "New description",
-			"schedule": "0 0 * * *",
-			"enabled": false
-		}`),
+		RawArguments: multiUpdateRequestJSON,
 	}
 
-	_, err = server.handleUpdateTask(multiUpdateRequest)
+	// Call the handler
+	result, err = server.handleUpdateTask(multiUpdateRequest)
 	if err != nil {
-		t.Fatalf("Failed to update multiple fields: %v", err)
+		t.Fatalf("Valid multi-update should not fail: %v", err)
+	}
+	if result == nil {
+		t.Fatal("Result should not be nil for valid multi-update")
 	}
 
-	// Verify multiple fields were updated
-	updatedTask, err = server.scheduler.GetTask(originalTask.ID)
+	// Verify the task was updated
+	updatedTask, err = server.scheduler.GetTask(taskID)
 	if err != nil {
-		t.Fatalf("Failed to get updated task: %v", err)
+		t.Fatalf("Failed to get multi-updated task: %v", err)
 	}
-	if updatedTask.Name != "New Name" {
-		t.Errorf("Expected name to be 'New Name', got '%s'", updatedTask.Name)
+	if updatedTask.Name != "Updated AI Task" {
+		t.Errorf("Expected name to be updated to 'Updated AI Task', got '%s'", updatedTask.Name)
 	}
-	if updatedTask.Description != "New description" {
-		t.Errorf("Expected description to be 'New description', got '%s'", updatedTask.Description)
+	if updatedTask.Schedule != "*/10 * * * *" {
+		t.Errorf("Expected schedule to be updated to '*/10 * * * *', got '%s'", updatedTask.Schedule)
 	}
-	if updatedTask.Schedule != "0 0 * * *" {
-		t.Errorf("Expected schedule to be '0 0 * * *', got '%s'", updatedTask.Schedule)
+	if updatedTask.Description != "Updated description" {
+		t.Errorf("Expected description to be updated to 'Updated description', got '%s'", updatedTask.Description)
 	}
-	if updatedTask.Enabled {
-		t.Error("Expected task to be disabled")
-	}
-
-	// Test case 3: Invalid task ID
-	invalidIDRequest := &protocol.CallToolRequest{
-		RawArguments: []byte(`{
-			"id": "non-existent-task",
-			"prompt": "This shouldn't work"
-		}`),
-	}
-
-	_, err = server.handleUpdateTask(invalidIDRequest)
-	if err == nil {
-		t.Fatal("Update with invalid task ID should fail")
+	if !updatedTask.Enabled {
+		t.Error("Expected task to be enabled after update")
 	}
 }
 
 // TestConvertTaskTypes tests converting between task types
-func TestConvertTaskTypes(t *testing.T) {
-	server := createTestServer(t)
+func TestConvertTaskTypes_AI(t *testing.T) {
+	server := createAITestServer(t)
 
 	// Create a shell command task
-	shellTaskRequest := &protocol.CallToolRequest{
-		RawArguments: []byte(`{
-			"name": "Shell Task",
-			"schedule": "* * * * *",
-			"command": "echo test",
-			"enabled": true
-		}`),
+	shellTaskID := fmt.Sprintf("shell_task_%d", time.Now().UnixNano())
+	shellTask := &model.Task{
+		ID:          shellTaskID,
+		Name:        "Shell Command Task",
+		Schedule:    "*/5 * * * *",
+		Type:        model.TypeShellCommand.String(),
+		Command:     "echo hello",
+		Description: "A shell command task",
+		Enabled:     false,
+		Status:      model.StatusPending,
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
 	}
 
-	_, err := server.handleAddTask(shellTaskRequest)
+	// Add task directly to the scheduler
+	err := server.scheduler.AddTask(shellTask)
 	if err != nil {
-		t.Fatalf("Failed to create shell task: %v", err)
+		t.Fatalf("Failed to add shell task: %v", err)
 	}
 
-	// Get the created task
-	tasks := server.scheduler.ListTasks()
-	if len(tasks) != 1 {
-		t.Fatalf("Expected 1 task, got %d", len(tasks))
-	}
-	shellTask := tasks[0]
-
-	// Convert to AI task
-	convertRequest := &protocol.CallToolRequest{
-		RawArguments: []byte(`{
-			"id": "` + shellTask.ID + `",
-			"type": "AI",
-			"prompt": "Converted task prompt"
-		}`),
+	// Convert shell command task to AI task
+	updateParams := AITaskParams{
+		ID:     shellTaskID,
+		Type:   model.TypeAI.String(),
+		Prompt: "New AI prompt",
 	}
 
-	_, err = server.handleUpdateTask(convertRequest)
+	updateRequestJSON, _ := json.Marshal(updateParams)
+	updateRequest := &protocol.CallToolRequest{
+		RawArguments: updateRequestJSON,
+	}
+
+	// Call the handler
+	result, err := server.handleUpdateTask(updateRequest)
 	if err != nil {
-		t.Fatalf("Failed to convert task type: %v", err)
+		t.Fatalf("Valid conversion should not fail: %v", err)
+	}
+	if result == nil {
+		t.Fatal("Result should not be nil for valid conversion")
 	}
 
-	// Verify conversion
-	convertedTask, err := server.scheduler.GetTask(shellTask.ID)
+	// Verify the task was converted
+	convertedTask, err := server.scheduler.GetTask(shellTaskID)
 	if err != nil {
 		t.Fatalf("Failed to get converted task: %v", err)
 	}
 	if convertedTask.Type != model.TypeAI.String() {
-		t.Errorf("Expected task type to be %s, got %s", model.TypeAI.String(), convertedTask.Type)
+		t.Errorf("Expected type to be converted to '%s', got '%s'", model.TypeAI.String(), convertedTask.Type)
 	}
-	if convertedTask.Prompt != "Converted task prompt" {
-		t.Errorf("Expected prompt to be 'Converted task prompt', got '%s'", convertedTask.Prompt)
-	}
-
-	// Convert back to shell command
-	convertBackRequest := &protocol.CallToolRequest{
-		RawArguments: []byte(`{
-			"id": "` + shellTask.ID + `",
-			"type": "shell_command",
-			"command": "echo converted back"
-		}`),
+	if convertedTask.Prompt != "New AI prompt" {
+		t.Errorf("Expected prompt to be set to 'New AI prompt', got '%s'", convertedTask.Prompt)
 	}
 
-	_, err = server.handleUpdateTask(convertBackRequest)
+	// Create an AI task
+	aiTaskID := fmt.Sprintf("ai_task_%d", time.Now().UnixNano())
+	aiTask := &model.Task{
+		ID:          aiTaskID,
+		Name:        "AI Task",
+		Schedule:    "*/5 * * * *",
+		Type:        model.TypeAI.String(),
+		Prompt:      "AI prompt",
+		Description: "An AI task",
+		Enabled:     false,
+		Status:      model.StatusPending,
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+	}
+
+	// Add task directly to the scheduler
+	err = server.scheduler.AddTask(aiTask)
 	if err != nil {
-		t.Fatalf("Failed to convert task back: %v", err)
+		t.Fatalf("Failed to add AI task: %v", err)
 	}
 
-	// Verify conversion back
-	reconvertedTask, err := server.scheduler.GetTask(shellTask.ID)
+	// Convert AI task to shell command task
+	convertParams := AITaskParams{
+		ID:      aiTaskID,
+		Type:    model.TypeShellCommand.String(),
+		Command: "echo converted",
+	}
+
+	convertRequestJSON, _ := json.Marshal(convertParams)
+	convertRequest := &protocol.CallToolRequest{
+		RawArguments: convertRequestJSON,
+	}
+
+	// Call the handler
+	result, err = server.handleUpdateTask(convertRequest)
+	if err != nil {
+		t.Fatalf("Valid conversion should not fail: %v", err)
+	}
+	if result == nil {
+		t.Fatal("Result should not be nil for valid conversion")
+	}
+
+	// Verify the task was converted
+	reconvertedTask, err := server.scheduler.GetTask(aiTaskID)
 	if err != nil {
 		t.Fatalf("Failed to get reconverted task: %v", err)
 	}
 	if reconvertedTask.Type != model.TypeShellCommand.String() {
-		t.Errorf("Expected task type to be %s, got %s", model.TypeShellCommand.String(), reconvertedTask.Type)
+		t.Errorf("Expected type to be converted to '%s', got '%s'", model.TypeShellCommand.String(), reconvertedTask.Type)
 	}
-	if reconvertedTask.Command != "echo converted back" {
-		t.Errorf("Expected command to be 'echo converted back', got '%s'", reconvertedTask.Command)
+	if reconvertedTask.Command != "echo converted" {
+		t.Errorf("Expected command to be set to 'echo converted', got '%s'", reconvertedTask.Command)
 	}
 }

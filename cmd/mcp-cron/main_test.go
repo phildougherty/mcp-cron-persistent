@@ -15,10 +15,6 @@ import (
 func TestMCPServerCreation(t *testing.T) {
 	// Test creating MCP server with custom config
 
-	// Create a scheduler and executors first
-	cronScheduler := scheduler.NewScheduler()
-	commandExecutor := command.NewCommandExecutor()
-
 	// Import the config package from the same repo
 	cfg := &config.Config{
 		Server: config.ServerConfig{
@@ -26,7 +22,14 @@ func TestMCPServerCreation(t *testing.T) {
 			Port:          9999,
 			TransportMode: "stdio", // Use stdio to avoid network binding
 		},
+		Scheduler: config.SchedulerConfig{
+			DefaultTimeout: config.DefaultConfig().Scheduler.DefaultTimeout,
+		},
 	}
+
+	// Create a scheduler and executors first
+	cronScheduler := scheduler.NewScheduler(&cfg.Scheduler)
+	commandExecutor := command.NewCommandExecutor()
 
 	// Create agent executor with config
 	agentExecutor := agent.NewAgentExecutor(cfg)
