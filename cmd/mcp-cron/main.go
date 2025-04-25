@@ -70,6 +70,18 @@ func loadConfig() *config.Config {
 	config.FromEnv(cfg)
 
 	// Override with command-line flags
+	applyCommandLineFlagsToConfig(cfg)
+
+	// Validate the configuration
+	if err := cfg.Validate(); err != nil {
+		log.Fatalf("Invalid configuration: %v", err)
+	}
+
+	return cfg
+}
+
+// applyCommandLineFlagsToConfig applies command line flags to the configuration
+func applyCommandLineFlagsToConfig(cfg *config.Config) {
 	if *address != "" {
 		cfg.Server.Address = *address
 	}
@@ -85,8 +97,6 @@ func loadConfig() *config.Config {
 	if *logFile != "" {
 		cfg.Logging.FilePath = *logFile
 	}
-
-	// AI-related command-line flags
 	if *aiModel != "" {
 		cfg.AI.Model = *aiModel
 	}
@@ -96,13 +106,6 @@ func loadConfig() *config.Config {
 	if *mcpConfigPath != "" {
 		cfg.AI.MCPConfigFilePath = *mcpConfigPath
 	}
-
-	// Validate the configuration
-	if err := cfg.Validate(); err != nil {
-		log.Fatalf("Invalid configuration: %v", err)
-	}
-
-	return cfg
 }
 
 // Application represents the running application
@@ -119,7 +122,7 @@ func createApp(cfg *config.Config) (*Application, error) {
 	// Create components
 	cmdExec := command.NewCommandExecutor()
 	agentExec := agent.NewAgentExecutor(cfg)
-	sched := scheduler.NewScheduler()
+	sched := scheduler.NewScheduler(&cfg.Scheduler)
 
 	// Create the MCP server
 	mcpServer, err := server.NewMCPServer(cfg, sched, cmdExec, agentExec)

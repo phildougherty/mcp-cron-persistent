@@ -20,21 +20,29 @@ import (
 	"github.com/jolks/mcp-cron/internal/scheduler"
 )
 
-func TestNewMCPServer(t *testing.T) {
-	// Create dependencies
-	sched := scheduler.NewScheduler()
-	exec := command.NewCommandExecutor()
+// createTestSchedulerConfig creates a default scheduler config for testing
+func createTestSchedulerConfig() *config.SchedulerConfig {
+	return &config.SchedulerConfig{
+		DefaultTimeout: 10 * time.Minute,
+	}
+}
 
-	// Test with proper config values
+func TestNewMCPServer(t *testing.T) {
+	// Create a config
 	cfg := &config.Config{
 		Server: config.ServerConfig{
 			Address:       "localhost",
 			Port:          8080,
 			TransportMode: "sse",
 		},
+		Scheduler: *createTestSchedulerConfig(),
 	}
 
+	// Create dependencies
+	sched := scheduler.NewScheduler(&cfg.Scheduler)
+	exec := command.NewCommandExecutor()
 	agentExec := agent.NewAgentExecutor(cfg)
+
 	server, err := NewMCPServer(cfg, sched, exec, agentExec)
 	if err != nil {
 		t.Fatalf("Failed to create server with default config: %v", err)
@@ -55,20 +63,21 @@ func TestNewMCPServer(t *testing.T) {
 }
 
 func TestNewMCPServerWithCustomConfig(t *testing.T) {
-	// Create dependencies
-	sched := scheduler.NewScheduler()
-	exec := command.NewCommandExecutor()
-
-	// Test with custom config
+	// Create a config
 	cfg := &config.Config{
 		Server: config.ServerConfig{
 			Address:       "127.0.0.1",
 			Port:          9090,
 			TransportMode: "sse",
 		},
+		Scheduler: *createTestSchedulerConfig(),
 	}
 
+	// Create dependencies
+	sched := scheduler.NewScheduler(&cfg.Scheduler)
+	exec := command.NewCommandExecutor()
 	agentExec := agent.NewAgentExecutor(cfg)
+
 	server, err := NewMCPServer(cfg, sched, exec, agentExec)
 	if err != nil {
 		t.Fatalf("Failed to create server with custom config: %v", err)
@@ -89,18 +98,19 @@ func TestMCPServerStartStop(t *testing.T) {
 		t.Skip("Skipping test in CI environment")
 	}
 
-	// Create dependencies
-	sched := scheduler.NewScheduler()
-	exec := command.NewCommandExecutor()
-
-	// Create server with stdio transport to avoid network binding
+	// Create a config
 	cfg := &config.Config{
 		Server: config.ServerConfig{
 			TransportMode: "stdio", // Use stdio to avoid network binding
 		},
+		Scheduler: *createTestSchedulerConfig(),
 	}
 
+	// Create dependencies
+	sched := scheduler.NewScheduler(&cfg.Scheduler)
+	exec := command.NewCommandExecutor()
 	agentExec := agent.NewAgentExecutor(cfg)
+
 	server, err := NewMCPServer(cfg, sched, exec, agentExec)
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
@@ -131,18 +141,19 @@ func TestTaskHandlers(t *testing.T) {
 	// This is a simple existence test for the handlers
 	// Full testing of handlers would require significant mocking of the MCP protocol
 
-	// Create dependencies
-	sched := scheduler.NewScheduler()
-	exec := command.NewCommandExecutor()
-
-	// Create server with stdio transport to avoid network binding
+	// Create a config
 	cfg := &config.Config{
 		Server: config.ServerConfig{
 			TransportMode: "stdio", // Use stdio to avoid network binding
 		},
+		Scheduler: *createTestSchedulerConfig(),
 	}
 
+	// Create dependencies
+	sched := scheduler.NewScheduler(&cfg.Scheduler)
+	exec := command.NewCommandExecutor()
 	agentExec := agent.NewAgentExecutor(cfg)
+
 	server, err := NewMCPServer(cfg, sched, exec, agentExec)
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
@@ -156,23 +167,24 @@ func TestTaskHandlers(t *testing.T) {
 
 // TestTaskCreationTimeFields verifies that LastRun and NextRun are properly initialized
 func TestTaskCreationTimeFields(t *testing.T) {
+	// Create a config
+	cfg := &config.Config{
+		Server: config.ServerConfig{
+			TransportMode: "stdio",
+		},
+		Scheduler: *createTestSchedulerConfig(),
+	}
+
 	// Create a scheduler
-	sched := scheduler.NewScheduler()
+	sched := scheduler.NewScheduler(&cfg.Scheduler)
 
 	// Start the scheduler
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	exec := command.NewCommandExecutor()
-
-	// Create server
-	cfg := &config.Config{
-		Server: config.ServerConfig{
-			TransportMode: "stdio",
-		},
-	}
-
 	agentExec := agent.NewAgentExecutor(cfg)
+
 	server, err := NewMCPServer(cfg, sched, exec, agentExec)
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
@@ -245,8 +257,17 @@ func TestLogFilePath(t *testing.T) {
 	// Get the directory containing the executable
 	expectedDir := filepath.Dir(execPath)
 
+	// Create a config
+	cfg := &config.Config{
+		Server: config.ServerConfig{
+			TransportMode: "stdio",
+			Name:          "mcp-cron",
+		},
+		Scheduler: *createTestSchedulerConfig(),
+	}
+
 	// Create dependencies
-	sched := scheduler.NewScheduler()
+	sched := scheduler.NewScheduler(&cfg.Scheduler)
 	exec := command.NewCommandExecutor()
 
 	// Create a test logger to capture log messages
@@ -272,14 +293,6 @@ func TestLogFilePath(t *testing.T) {
 	// Define server name for the test
 	serverName := "mcp-cron"
 
-	// Create server with stdio transport
-	cfg := &config.Config{
-		Server: config.ServerConfig{
-			TransportMode: "stdio",
-			Name:          serverName,
-		},
-	}
-
 	agentExec := agent.NewAgentExecutor(cfg)
 	_, err = NewMCPServer(cfg, sched, exec, agentExec)
 	if err != nil {
@@ -297,13 +310,12 @@ func TestLogFilePath(t *testing.T) {
 
 // TestTaskTypeHandling verifies that task types are correctly handled during creation and update
 func TestTaskTypeHandling(t *testing.T) {
-	// Create dependencies
-	sched := scheduler.NewScheduler()
-	cmdExec := command.NewCommandExecutor()
-
 	// Create a config for testing
 	cfg := config.DefaultConfig()
 
+	// Create dependencies
+	sched := scheduler.NewScheduler(&cfg.Scheduler)
+	cmdExec := command.NewCommandExecutor()
 	agentExec := agent.NewAgentExecutor(cfg)
 
 	// Create a logger
@@ -317,6 +329,7 @@ func TestTaskTypeHandling(t *testing.T) {
 		cmdExecutor:   cmdExec,
 		agentExecutor: agentExec,
 		logger:        logger,
+		config:        cfg,
 	}
 
 	// Set the server as task executor (required for scheduling)

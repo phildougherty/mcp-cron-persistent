@@ -106,9 +106,7 @@ The following environment variables are supported:
 | `MCP_CRON_SERVER_TRANSPORT` | Transport mode: `sse` or `stdio` | `sse` |
 | `MCP_CRON_SERVER_NAME` | Server name | `mcp-cron` |
 | `MCP_CRON_SERVER_VERSION` | Server version | `0.1.0` |
-| `MCP_CRON_SCHEDULER_MAX_CONCURRENT` | Maximum concurrent tasks | `5` |
 | `MCP_CRON_SCHEDULER_DEFAULT_TIMEOUT` | Default timeout for task execution | `10m` |
-| `MCP_CRON_SCHEDULER_EXECUTION_DIR` | Directory where tasks are executed | `./` |
 | `MCP_CRON_LOGGING_LEVEL` | Logging level: `debug`, `info`, `warn`, `error`, `fatal` | `info` |
 | `MCP_CRON_LOGGING_FILE` | Log file path | stdout |
 | `OPENAI_API_KEY` | OpenAI API key for AI tasks | Not set |

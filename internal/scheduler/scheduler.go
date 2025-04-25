@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jolks/mcp-cron/internal/config"
 	"github.com/jolks/mcp-cron/internal/errors"
 	"github.com/jolks/mcp-cron/internal/model"
 	"github.com/robfig/cron/v3"
@@ -19,10 +20,11 @@ type Scheduler struct {
 	entryIDs     map[string]cron.EntryID
 	mu           sync.RWMutex
 	taskExecutor model.Executor
+	config       *config.SchedulerConfig
 }
 
 // NewScheduler creates a new scheduler instance
-func NewScheduler() *Scheduler {
+func NewScheduler(cfg *config.SchedulerConfig) *Scheduler {
 	cronOpts := cron.New(
 		cron.WithParser(cron.NewParser(
 			cron.SecondOptional|cron.Minute|cron.Hour|cron.Dom|cron.Month|cron.Dow|cron.Descriptor)),
@@ -35,6 +37,7 @@ func NewScheduler() *Scheduler {
 		cron:     cronOpts,
 		tasks:    make(map[string]*model.Task),
 		entryIDs: make(map[string]cron.EntryID),
+		config:   cfg,
 	}
 
 	return scheduler
@@ -248,7 +251,7 @@ func (s *Scheduler) scheduleTask(task *model.Task) error {
 
 		// Execute the task
 		ctx := context.Background()
-		timeout := 5 * time.Minute // Default timeout, could be made configurable
+		timeout := s.config.DefaultTimeout // Use the configured default timeout
 
 		if err := s.taskExecutor.Execute(ctx, task, timeout); err != nil {
 			task.Status = model.StatusFailed
@@ -257,15 +260,7 @@ func (s *Scheduler) scheduleTask(task *model.Task) error {
 		}
 
 		task.UpdatedAt = time.Now()
-
-		// Get next run time
-		entries := s.cron.Entries()
-		for _, entry := range entries {
-			if entry.ID == s.entryIDs[task.ID] {
-				task.NextRun = entry.Next
-				break
-			}
-		}
+		s.updateNextRunTime(task)
 	}
 
 	// Add the job to cron
@@ -276,15 +271,20 @@ func (s *Scheduler) scheduleTask(task *model.Task) error {
 
 	// Store the cron entry ID
 	s.entryIDs[task.ID] = entryID
-
-	// Update the task's next run time
-	entries := s.cron.Entries()
-	for _, entry := range entries {
-		if entry.ID == entryID {
-			task.NextRun = entry.Next
-			break
-		}
-	}
+	s.updateNextRunTime(task)
 
 	return nil
+}
+
+// updateNextRunTime updates the task's next run time based on its cron entry
+func (s *Scheduler) updateNextRunTime(task *model.Task) {
+	if entryID, exists := s.entryIDs[task.ID]; exists {
+		entries := s.cron.Entries()
+		for _, entry := range entries {
+			if entry.ID == entryID {
+				task.NextRun = entry.Next
+				break
+			}
+		}
+	}
 }

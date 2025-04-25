@@ -276,32 +276,17 @@ func (s *MCPServer) handleAddTask(request *protocol.CallToolRequest) (*protocol.
 		return createErrorResponse(err)
 	}
 
-	// API-level validation requires all fields needed for both scheduling AND execution:
-	// - Name: For identification and display purposes
-	// - Schedule: Required by the scheduler to determine when to run the task
-	// - Command: Required by the executor to know what to execute
-	if params.Name == "" || params.Schedule == "" || params.Command == "" {
-		return createErrorResponse(errors.InvalidInput("missing required fields: name, schedule, and command are required"))
+	// Validate parameters
+	if err := validateShellTaskParams(params.Name, params.Schedule, params.Command); err != nil {
+		return createErrorResponse(err)
 	}
 
 	s.logger.Debugf("Handling add_task request for task %s", params.Name)
 
 	// Create task
-	taskID := fmt.Sprintf("task_%d", time.Now().UnixNano())
-	task := &model.Task{
-		ID:          taskID,
-		Name:        params.Name,
-		Schedule:    params.Schedule,
-		Type:        model.TypeShellCommand.String(),
-		Command:     params.Command,
-		Description: params.Description,
-		Enabled:     params.Enabled,
-		Status:      model.StatusPending,
-		LastRun:     time.Now(),
-		NextRun:     time.Now(),
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
-	}
+	task := createBaseTask(params.Name, params.Schedule, params.Description, params.Enabled)
+	task.Type = model.TypeShellCommand.String()
+	task.Command = params.Command
 
 	// Add task to scheduler
 	if err := s.scheduler.AddTask(task); err != nil {
@@ -319,34 +304,17 @@ func (s *MCPServer) handleAddAITask(request *protocol.CallToolRequest) (*protoco
 		return createErrorResponse(err)
 	}
 
-	// API-level validation requires all fields needed for both scheduling AND execution:
-	// - Name: For identification and display purposes
-	// - Schedule: Required by the scheduler to determine when to run the task
-	// - Prompt: Required by the executor to know what to execute
-	//
-	// Note that at runtime, the AgentExecutor only validates ID and Prompt
-	if params.Name == "" || params.Schedule == "" || params.Prompt == "" {
-		return createErrorResponse(errors.InvalidInput("missing required fields: name, schedule, and prompt are required"))
+	// Validate parameters
+	if err := validateAITaskParams(params.Name, params.Schedule, params.Prompt); err != nil {
+		return createErrorResponse(err)
 	}
 
 	s.logger.Debugf("Handling add_ai_task request for task %s", params.Name)
 
 	// Create task
-	taskID := fmt.Sprintf("task_%d", time.Now().UnixNano())
-	task := &model.Task{
-		ID:          taskID,
-		Name:        params.Name,
-		Schedule:    params.Schedule,
-		Type:        model.TypeAI.String(),
-		Prompt:      params.Prompt,
-		Description: params.Description,
-		Enabled:     params.Enabled,
-		Status:      model.StatusPending,
-		LastRun:     time.Now(),
-		NextRun:     time.Now(),
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
-	}
+	task := createBaseTask(params.Name, params.Schedule, params.Description, params.Enabled)
+	task.Type = model.TypeAI.String()
+	task.Prompt = params.Prompt
 
 	// Add task to scheduler
 	if err := s.scheduler.AddTask(task); err != nil {
@@ -354,6 +322,25 @@ func (s *MCPServer) handleAddAITask(request *protocol.CallToolRequest) (*protoco
 	}
 
 	return createTaskResponse(task)
+}
+
+// createBaseTask creates a base task with common fields initialized
+func createBaseTask(name, schedule, description string, enabled bool) *model.Task {
+	now := time.Now()
+	taskID := fmt.Sprintf("task_%d", now.UnixNano())
+
+	return &model.Task{
+		ID:          taskID,
+		Name:        name,
+		Schedule:    schedule,
+		Description: description,
+		Enabled:     enabled,
+		Status:      model.StatusPending,
+		LastRun:     now,
+		NextRun:     now,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
 }
 
 // handleUpdateTask updates an existing task
@@ -365,6 +352,10 @@ func (s *MCPServer) handleUpdateTask(request *protocol.CallToolRequest) (*protoc
 		return createErrorResponse(err)
 	}
 
+	if params.ID == "" {
+		return createErrorResponse(errors.InvalidInput("task ID is required"))
+	}
+
 	s.logger.Debugf("Handling update_task request for task %s", params.ID)
 
 	// Get existing task
@@ -373,52 +364,54 @@ func (s *MCPServer) handleUpdateTask(request *protocol.CallToolRequest) (*protoc
 		return createErrorResponse(err)
 	}
 
-	// Update fields if provided
-	if params.Name != "" {
-		existingTask.Name = params.Name
-	}
+	// Update fields with provided values
+	updateTaskFields(existingTask, params, request.RawArguments)
 
-	if params.Schedule != "" {
-		existingTask.Schedule = params.Schedule
-	}
-
-	if params.Command != "" {
-		existingTask.Command = params.Command
-	}
-
-	if params.Prompt != "" {
-		existingTask.Prompt = params.Prompt
-	}
-
-	if params.Description != "" {
-		existingTask.Description = params.Description
-	}
-
-	// Update task type if provided
-	if params.Type != "" {
-		if strings.EqualFold(params.Type, model.TypeAI.String()) {
-			existingTask.Type = model.TypeAI.String()
-		} else if strings.EqualFold(params.Type, model.TypeShellCommand.String()) {
-			existingTask.Type = model.TypeShellCommand.String()
-		}
-	}
-
-	// Only update Enabled if it's explicitly in the JSON
-	var rawJSON map[string]interface{}
-	if err := utils.JsonUnmarshal(request.RawArguments, &rawJSON); err == nil {
-		if _, exists := rawJSON["enabled"]; exists {
-			existingTask.Enabled = params.Enabled
-		}
-	}
-
-	existingTask.UpdatedAt = time.Now()
-
-	// Update task
+	// Update task in scheduler
 	if err := s.scheduler.UpdateTask(existingTask); err != nil {
 		return createErrorResponse(err)
 	}
 
 	return createTaskResponse(existingTask)
+}
+
+// updateTaskFields updates task fields with provided values
+func updateTaskFields(task *model.Task, params AITaskParams, rawJSON []byte) {
+	// Update non-empty string fields
+	if params.Name != "" {
+		task.Name = params.Name
+	}
+	if params.Schedule != "" {
+		task.Schedule = params.Schedule
+	}
+	if params.Command != "" {
+		task.Command = params.Command
+	}
+	if params.Prompt != "" {
+		task.Prompt = params.Prompt
+	}
+	if params.Description != "" {
+		task.Description = params.Description
+	}
+
+	// Update task type if provided
+	if params.Type != "" {
+		if strings.EqualFold(params.Type, model.TypeAI.String()) {
+			task.Type = model.TypeAI.String()
+		} else if strings.EqualFold(params.Type, model.TypeShellCommand.String()) {
+			task.Type = model.TypeShellCommand.String()
+		}
+	}
+
+	// Only update Enabled if it's explicitly in the JSON
+	var rawParams map[string]interface{}
+	if err := utils.JsonUnmarshal(rawJSON, &rawParams); err == nil {
+		if _, exists := rawParams["enabled"]; exists {
+			task.Enabled = params.Enabled
+		}
+	}
+
+	task.UpdatedAt = time.Now()
 }
 
 // handleRemoveTask removes a task

@@ -17,11 +17,11 @@ import (
 // TestTaskExecutorImplementation verifies that the MCPServer properly
 // implements the TaskExecutor interface
 func TestTaskExecutorImplementation(t *testing.T) {
-	// Create a mock scheduler
-	sched := scheduler.NewScheduler()
-
 	// Create a config for testing
 	cfg := config.DefaultConfig()
+
+	// Create a mock scheduler
+	sched := scheduler.NewScheduler(&cfg.Scheduler)
 
 	// Create executors
 	cmdExec := command.NewCommandExecutor()
@@ -38,6 +38,7 @@ func TestTaskExecutorImplementation(t *testing.T) {
 		cmdExecutor:   cmdExec,
 		agentExecutor: agentExec,
 		logger:        logger,
+		config:        cfg,
 	}
 
 	// Set the server as the task executor for the scheduler

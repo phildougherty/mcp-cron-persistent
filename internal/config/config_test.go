@@ -29,14 +29,8 @@ func TestDefaultConfig(t *testing.T) {
 	}
 
 	// Test Scheduler defaults
-	if cfg.Scheduler.MaxConcurrent != 5 {
-		t.Errorf("Expected default max concurrent to be 5, got %d", cfg.Scheduler.MaxConcurrent)
-	}
 	if cfg.Scheduler.DefaultTimeout != 10*time.Minute {
 		t.Errorf("Expected default timeout to be 10 minutes, got %s", cfg.Scheduler.DefaultTimeout)
-	}
-	if cfg.Scheduler.ExecutionDir != "./" {
-		t.Errorf("Expected default execution dir to be './', got '%s'", cfg.Scheduler.ExecutionDir)
 	}
 
 	// Test Logging defaults
@@ -95,13 +89,6 @@ func TestValidate(t *testing.T) {
 		t.Error("Expected error for invalid transport mode, got nil")
 	}
 
-	// Test invalid max concurrent (zero)
-	invalidMaxConcurrent := DefaultConfig()
-	invalidMaxConcurrent.Scheduler.MaxConcurrent = 0
-	if err := invalidMaxConcurrent.Validate(); err == nil {
-		t.Error("Expected error for zero max concurrent, got nil")
-	}
-
 	// Test invalid default timeout (too short)
 	invalidTimeout := DefaultConfig()
 	invalidTimeout.Scheduler.DefaultTimeout = time.Millisecond * 500
@@ -132,9 +119,7 @@ func TestFromEnv(t *testing.T) {
 		"MCP_CRON_SERVER_TRANSPORT":          os.Getenv("MCP_CRON_SERVER_TRANSPORT"),
 		"MCP_CRON_SERVER_NAME":               os.Getenv("MCP_CRON_SERVER_NAME"),
 		"MCP_CRON_SERVER_VERSION":            os.Getenv("MCP_CRON_SERVER_VERSION"),
-		"MCP_CRON_SCHEDULER_MAX_CONCURRENT":  os.Getenv("MCP_CRON_SCHEDULER_MAX_CONCURRENT"),
 		"MCP_CRON_SCHEDULER_DEFAULT_TIMEOUT": os.Getenv("MCP_CRON_SCHEDULER_DEFAULT_TIMEOUT"),
-		"MCP_CRON_SCHEDULER_EXECUTION_DIR":   os.Getenv("MCP_CRON_SCHEDULER_EXECUTION_DIR"),
 		"MCP_CRON_LOGGING_LEVEL":             os.Getenv("MCP_CRON_LOGGING_LEVEL"),
 		"MCP_CRON_LOGGING_FILE":              os.Getenv("MCP_CRON_LOGGING_FILE"),
 		"OPENAI_API_KEY":                     os.Getenv("OPENAI_API_KEY"),
@@ -166,9 +151,7 @@ func TestFromEnv(t *testing.T) {
 	os.Setenv("MCP_CRON_SERVER_TRANSPORT", "stdio")
 	os.Setenv("MCP_CRON_SERVER_NAME", "test-server")
 	os.Setenv("MCP_CRON_SERVER_VERSION", "1.0.0")
-	os.Setenv("MCP_CRON_SCHEDULER_MAX_CONCURRENT", "10")
 	os.Setenv("MCP_CRON_SCHEDULER_DEFAULT_TIMEOUT", "5m")
-	os.Setenv("MCP_CRON_SCHEDULER_EXECUTION_DIR", "/tmp")
 	os.Setenv("MCP_CRON_LOGGING_LEVEL", "debug")
 	os.Setenv("MCP_CRON_LOGGING_FILE", "/tmp/test.log")
 	os.Setenv("OPENAI_API_KEY", "test-key")
@@ -197,14 +180,8 @@ func TestFromEnv(t *testing.T) {
 	if cfg.Server.Version != "1.0.0" {
 		t.Errorf("Expected server version '1.0.0', got '%s'", cfg.Server.Version)
 	}
-	if cfg.Scheduler.MaxConcurrent != 10 {
-		t.Errorf("Expected max concurrent 10, got %d", cfg.Scheduler.MaxConcurrent)
-	}
 	if cfg.Scheduler.DefaultTimeout != 5*time.Minute {
 		t.Errorf("Expected default timeout 5m, got %s", cfg.Scheduler.DefaultTimeout)
-	}
-	if cfg.Scheduler.ExecutionDir != "/tmp" {
-		t.Errorf("Expected execution dir '/tmp', got '%s'", cfg.Scheduler.ExecutionDir)
 	}
 	if cfg.Logging.Level != "debug" {
 		t.Errorf("Expected logging level 'debug', got '%s'", cfg.Logging.Level)
@@ -234,14 +211,6 @@ func TestFromEnv(t *testing.T) {
 	FromEnv(cfg)
 	if cfg.Server.Port != 8080 {
 		t.Errorf("Expected server port to remain 8080 for invalid input, got %d", cfg.Server.Port)
-	}
-
-	// Test invalid max concurrent format
-	os.Setenv("MCP_CRON_SCHEDULER_MAX_CONCURRENT", "invalid")
-	cfg = DefaultConfig()
-	FromEnv(cfg)
-	if cfg.Scheduler.MaxConcurrent != 5 {
-		t.Errorf("Expected max concurrent to remain 5 for invalid input, got %d", cfg.Scheduler.MaxConcurrent)
 	}
 
 	// Test invalid timeout format
