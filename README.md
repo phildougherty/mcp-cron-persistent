@@ -1,13 +1,13 @@
 # MCP Cron
 
-Model Context Protocol (MCP) server for scheduling and managing tasks through a standardized API. It leverages the [go-mcp](https://github.com/ThinkInAIXYZ/go-mcp) SDK to provide task scheduling capabilities via the MCP protocol.
+Model Context Protocol (MCP) server for scheduling and managing tasks through a standardized API. The server provides task scheduling capabilities supporting both shell commands and AI-powered tasks, all accessible via the MCP protocol.
 
 ## Features
 
-- Schedule tasks using cron expressions
-- [Manage tasks](#available-mcp-tools)
+- Schedule shell command or prompt to AI tasks using cron expressions
+- AI can have access to MCP servers 
+- [Manage tasks](#available-mcp-tools) via MCP protocol
 - Task execution with command output capture
-- MCP protocol support for seamless integration with AI models and applications
 
 ## Installation
 
@@ -108,6 +108,8 @@ The following environment variables are supported:
 | `MCP_SCHEDULER_EXECUTION_DIR` | Directory where tasks are executed | `./` |
 | `MCP_LOGGING_LEVEL` | Logging level: `debug`, `info`, `warn`, `error`, `fatal` | `info` |
 | `MCP_LOGGING_FILE` | Log file path | stdout |
+| `OPENAI_API_KEY` | OpenAI API key for AI tasks | Not set |
+| `ENABLE_OPENAI_TESTS` | Enable OpenAI integration tests | `false` |
 
 ### Logging
 
@@ -125,10 +127,11 @@ The server exposes several tools through the MCP protocol:
 1. `list_tasks` - Lists all scheduled tasks
 2. `get_task` - Gets a specific task by ID
 3. `add_task` - Adds a new scheduled task
-4. `update_task` - Updates an existing task
-5. `remove_task` - Removes a task by ID
-6. `enable_task` - Enables a disabled task
-7. `disable_task` - Disables an enabled task
+4. `add_ai_task` - Adds a new scheduled AI (LLM) task with a prompt
+5. `update_task` - Updates an existing task
+6. `remove_task` - Removes a task by ID
+7. `enable_task` - Enables a disabled task
+8. `disable_task` - Disables an enabled task
 
 ### Task Format
 
@@ -140,6 +143,8 @@ Tasks have the following structure:
   "name": "Example Task",
   "schedule": "0 */5 * * * *",
   "command": "echo 'Task executed!'",
+  "prompt": "Analyze yesterday's sales data and provide a summary",
+  "type": "shell_command",
   "description": "An example task that runs every 5 minutes",
   "enabled": true,
   "lastRun": "2025-01-01T12:00:00Z",
@@ -149,6 +154,10 @@ Tasks have the following structure:
   "updatedAt": "2025-01-01T12:00:00Z"
 }
 ```
+
+For shell command tasks, use the `command` field to specify the command to execute.
+For AI tasks, use the `prompt` field to specify what the AI should do.
+The `type` field can be either `shell_command` (default) or `AI`.
 
 ### Task Status
 
@@ -190,13 +199,16 @@ mcp-cron/
 ├── cmd/
 │   └── mcp-cron/        # Main application entry point
 ├── internal/
+│   ├── agent/           # AI agent execution functionality 
+│   ├── command/         # Command execution functionality
 │   ├── config/          # Configuration handling
 │   ├── errors/          # Error types and handling
-│   ├── executor/        # Command execution functionality
 │   ├── logging/         # Logging utilities
+│   ├── model/           # Data models and types
 │   ├── scheduler/       # Task scheduling
 │   ├── server/          # MCP server implementation
 │   └── utils/           # Miscellanous utilities
+├── scripts/             # Utility scripts
 ├── go.mod               # Go modules definition
 ├── go.sum               # Go modules checksums
 └── README.md            # Project documentation

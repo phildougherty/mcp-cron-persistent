@@ -58,16 +58,18 @@ type AITaskParams struct {
 
 // MCPServer represents the MCP scheduler server
 type MCPServer struct {
-	scheduler     *scheduler.Scheduler
-	cmdExecutor   *command.CommandExecutor
-	agentExecutor *agent.AgentExecutor
-	server        *server.Server
-	address       string
-	port          int
-	stopCh        chan struct{}
-	wg            sync.WaitGroup
-	config        *config.Config
-	logger        *logging.Logger
+	scheduler      *scheduler.Scheduler
+	cmdExecutor    *command.CommandExecutor
+	agentExecutor  *agent.AgentExecutor
+	server         *server.Server
+	address        string
+	port           int
+	stopCh         chan struct{}
+	wg             sync.WaitGroup
+	config         *config.Config
+	logger         *logging.Logger
+	shutdownMutex  sync.Mutex
+	isShuttingDown bool
 }
 
 // NewMCPServer creates a new MCP scheduler server
@@ -206,6 +208,17 @@ func (s *MCPServer) Start(ctx context.Context) error {
 
 // Stop stops the MCP server
 func (s *MCPServer) Stop() error {
+	s.shutdownMutex.Lock()
+	defer s.shutdownMutex.Unlock()
+
+	// Return early if server is already being shut down
+	if s.isShuttingDown {
+		s.logger.Debugf("Stop called but server is already shutting down, ignoring")
+		return nil
+	}
+
+	s.isShuttingDown = true
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -213,7 +226,14 @@ func (s *MCPServer) Stop() error {
 		return errors.Internal(fmt.Errorf("error shutting down MCP server: %w", err))
 	}
 
-	close(s.stopCh)
+	// Only close stopCh if it hasn't been closed yet
+	select {
+	case <-s.stopCh:
+		// Channel is already closed, do nothing
+	default:
+		close(s.stopCh)
+	}
+
 	s.wg.Wait()
 	return nil
 }
