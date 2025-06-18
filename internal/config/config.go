@@ -18,8 +18,8 @@ type Config struct {
 	Scheduler SchedulerConfig
 	// Logging configuration
 	Logging LoggingConfig
-	// AI configuration
-	AI AIConfig
+	// OpenWebUI integration configuration
+	OpenWebUI OpenWebUIConfig
 	// Database configuration
 	Database DatabaseConfig
 }
@@ -52,32 +52,20 @@ type LoggingConfig struct {
 	FilePath string
 }
 
-// AIConfig holds AI-specific configuration
-type AIConfig struct {
-	// Primary LLM provider (ollama, openrouter, openai)
-	Provider string
-
-	// Ollama configuration
-	OllamaHost  string
-	OllamaPort  int
-	OllamaModel string
-
-	// OpenRouter configuration
-	OpenRouterAPIKey string
-	OpenRouterModel  string
-	OpenRouterURL    string
-
-	// OpenAI configuration (legacy/fallback)
-	OpenAIAPIKey string
-	Model        string // Legacy field for backwards compatibility
-
-	// General AI settings
-	EnableOpenAITests bool
-	MaxToolIterations int
-	MCPConfigFilePath string
-
-	// Request timeout (in seconds)
+// OpenWebUIConfig holds OpenWebUI integration configuration
+type OpenWebUIConfig struct {
+	// Base URL for OpenWebUI instance
+	BaseURL string
+	// API key for authentication
+	APIKey string
+	// Default model to use for AI tasks
+	Model string
+	// Default user ID for API calls
+	UserID string
+	// Request timeout in seconds
 	RequestTimeout int
+	// Enable OpenWebUI integration
+	Enabled bool
 }
 
 // DatabaseConfig holds database-specific configuration
@@ -105,31 +93,19 @@ func DefaultConfig() *Config {
 			Level:    "info",
 			FilePath: "",
 		},
-		AI: AIConfig{
-			Provider:          "ollama", // Default to Ollama
-			OllamaHost:        "desk",   // Default to desk
-			OllamaPort:        11434,
-			OllamaModel:       "qwen3:14b",
-			OpenRouterAPIKey:  "",
-			OpenRouterModel:   "anthropic/claude-3.5-sonnet",
-			OpenRouterURL:     "https://openrouter.ai/api/v1/chat/completions",
-			OpenAIAPIKey:      "",
-			Model:             "gpt-4o", // Legacy field
-			EnableOpenAITests: false,
-			MaxToolIterations: 20,
-			MCPConfigFilePath: filepath.Join(os.Getenv("HOME"), ".cursor", "mcp.json"),
-			RequestTimeout:    30, // 30 seconds
+		OpenWebUI: OpenWebUIConfig{
+			BaseURL:        "http://localhost:3000",
+			APIKey:         "",
+			Model:          "", // Will use OpenWebUI's default
+			UserID:         "scheduler",
+			RequestTimeout: 60, // 60 seconds for AI tasks
+			Enabled:        true,
 		},
 		Database: DatabaseConfig{
 			Path:    filepath.Join(os.Getenv("HOME"), ".mcp-cron", "mcp-cron.db"),
 			Enabled: true,
 		},
 	}
-}
-
-// GetOllamaEndpoint returns the full Ollama endpoint URL
-func (a *AIConfig) GetOllamaEndpoint() string {
-	return fmt.Sprintf("http://%s:%d", a.OllamaHost, a.OllamaPort)
 }
 
 // Validate checks if the configuration is valid
@@ -155,41 +131,13 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("log level must be one of: debug, info, warn, error, fatal")
 	}
 
-	// Validate AI config
-	if c.AI.MaxToolIterations < 1 {
-		return fmt.Errorf("max tool iterations must be at least 1")
-	}
-
-	// Validate AI provider
-	switch strings.ToLower(c.AI.Provider) {
-	case "ollama", "openrouter", "openai":
-		// Valid providers
-	default:
-		return fmt.Errorf("AI provider must be one of: ollama, openrouter, openai")
-	}
-
-	// Validate provider-specific configs
-	switch strings.ToLower(c.AI.Provider) {
-	case "openrouter":
-		if c.AI.OpenRouterAPIKey == "" {
-			return fmt.Errorf("OpenRouter API key is required when using openrouter provider")
+	// Validate OpenWebUI config if enabled
+	if c.OpenWebUI.Enabled {
+		if c.OpenWebUI.BaseURL == "" {
+			return fmt.Errorf("OpenWebUI base URL is required when OpenWebUI integration is enabled")
 		}
-		if c.AI.OpenRouterModel == "" {
-			return fmt.Errorf("OpenRouter model is required when using openrouter provider")
-		}
-	case "openai":
-		if c.AI.OpenAIAPIKey == "" {
-			return fmt.Errorf("OpenAI API key is required when using openai provider")
-		}
-	case "ollama":
-		if c.AI.OllamaHost == "" {
-			return fmt.Errorf("ollama host is required when using ollama provider")
-		}
-		if c.AI.OllamaPort <= 0 || c.AI.OllamaPort > 65535 {
-			return fmt.Errorf("ollama port must be between 1 and 65535")
-		}
-		if c.AI.OllamaModel == "" {
-			return fmt.Errorf("ollama model is required when using ollama provider")
+		if c.OpenWebUI.RequestTimeout < 1 {
+			return fmt.Errorf("OpenWebUI request timeout must be at least 1 second")
 		}
 	}
 
@@ -241,60 +189,26 @@ func FromEnv(config *Config) {
 		config.Logging.FilePath = val
 	}
 
-	// AI configuration
-	if val := os.Getenv("MCP_CRON_AI_PROVIDER"); val != "" {
-		config.AI.Provider = val
+	// OpenWebUI configuration
+	if val := os.Getenv("MCP_CRON_OPENWEBUI_BASE_URL"); val != "" {
+		config.OpenWebUI.BaseURL = val
 	}
-
-	// Ollama configuration
-	if val := os.Getenv("MCP_CRON_OLLAMA_HOST"); val != "" {
-		config.AI.OllamaHost = val
+	if val := os.Getenv("MCP_CRON_OPENWEBUI_API_KEY"); val != "" {
+		config.OpenWebUI.APIKey = val
 	}
-	if val := os.Getenv("MCP_CRON_OLLAMA_PORT"); val != "" {
-		if port, err := strconv.Atoi(val); err == nil {
-			config.AI.OllamaPort = port
-		}
+	if val := os.Getenv("MCP_CRON_OPENWEBUI_MODEL"); val != "" {
+		config.OpenWebUI.Model = val
 	}
-	if val := os.Getenv("MCP_CRON_OLLAMA_MODEL"); val != "" {
-		config.AI.OllamaModel = val
+	if val := os.Getenv("MCP_CRON_OPENWEBUI_USER_ID"); val != "" {
+		config.OpenWebUI.UserID = val
 	}
-
-	// OpenRouter configuration
-	if val := os.Getenv("OPENROUTER_API_KEY"); val != "" {
-		config.AI.OpenRouterAPIKey = val
-	}
-	if val := os.Getenv("MCP_CRON_OPENROUTER_API_KEY"); val != "" {
-		config.AI.OpenRouterAPIKey = val
-	}
-	if val := os.Getenv("MCP_CRON_OPENROUTER_MODEL"); val != "" {
-		config.AI.OpenRouterModel = val
-	}
-	if val := os.Getenv("MCP_CRON_OPENROUTER_URL"); val != "" {
-		config.AI.OpenRouterURL = val
-	}
-
-	// OpenAI configuration (legacy)
-	if val := os.Getenv("OPENAI_API_KEY"); val != "" {
-		config.AI.OpenAIAPIKey = val
-	}
-	if val := os.Getenv("MCP_CRON_ENABLE_OPENAI_TESTS"); val != "" {
-		config.AI.EnableOpenAITests = strings.ToLower(val) == "true"
-	}
-	if val := os.Getenv("MCP_CRON_AI_MODEL"); val != "" {
-		config.AI.Model = val
-	}
-	if val := os.Getenv("MCP_CRON_AI_MAX_TOOL_ITERATIONS"); val != "" {
-		if iterations, err := strconv.Atoi(val); err == nil {
-			config.AI.MaxToolIterations = iterations
-		}
-	}
-	if val := os.Getenv("MCP_CRON_MCP_CONFIG_FILE_PATH"); val != "" {
-		config.AI.MCPConfigFilePath = val
-	}
-	if val := os.Getenv("MCP_CRON_AI_REQUEST_TIMEOUT"); val != "" {
+	if val := os.Getenv("MCP_CRON_OPENWEBUI_REQUEST_TIMEOUT"); val != "" {
 		if timeout, err := strconv.Atoi(val); err == nil {
-			config.AI.RequestTimeout = timeout
+			config.OpenWebUI.RequestTimeout = timeout
 		}
+	}
+	if val := os.Getenv("MCP_CRON_OPENWEBUI_ENABLED"); val != "" {
+		config.OpenWebUI.Enabled = strings.ToLower(val) == "true"
 	}
 
 	// Database configuration

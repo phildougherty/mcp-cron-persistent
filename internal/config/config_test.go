@@ -41,23 +41,30 @@ func TestDefaultConfig(t *testing.T) {
 		t.Errorf("Expected default log file path to be empty, got '%s'", cfg.Logging.FilePath)
 	}
 
-	// Test AI defaults
-	if cfg.AI.OpenAIAPIKey != "" {
-		t.Errorf("Expected default OpenAI API key to be empty, got '%s'", cfg.AI.OpenAIAPIKey)
+	// Test OpenWebUI defaults
+	if cfg.OpenWebUI.BaseURL != "http://localhost:3000" {
+		t.Errorf("Expected default OpenWebUI base URL to be 'http://localhost:3000', got '%s'", cfg.OpenWebUI.BaseURL)
 	}
-	if cfg.AI.EnableOpenAITests != false {
-		t.Errorf("Expected default EnableOpenAITests to be false, got %v", cfg.AI.EnableOpenAITests)
+	if cfg.OpenWebUI.APIKey != "" {
+		t.Errorf("Expected default OpenWebUI API key to be empty, got '%s'", cfg.OpenWebUI.APIKey)
 	}
-	if cfg.AI.Model != "gpt-4o" {
-		t.Errorf("Expected default AI model to be 'gpt-4o', got '%s'", cfg.AI.Model)
+	if cfg.OpenWebUI.UserID != "scheduler" {
+		t.Errorf("Expected default OpenWebUI user ID to be 'scheduler', got '%s'", cfg.OpenWebUI.UserID)
 	}
-	if cfg.AI.MaxToolIterations != 20 {
-		t.Errorf("Expected default max tool iterations to be 20, got %d", cfg.AI.MaxToolIterations)
+	if cfg.OpenWebUI.RequestTimeout != 60 {
+		t.Errorf("Expected default OpenWebUI request timeout to be 60, got %d", cfg.OpenWebUI.RequestTimeout)
+	}
+	if !cfg.OpenWebUI.Enabled {
+		t.Errorf("Expected default OpenWebUI enabled to be true, got %v", cfg.OpenWebUI.Enabled)
 	}
 
-	expectedPath := filepath.Join(os.Getenv("HOME"), ".cursor", "mcp.json")
-	if cfg.AI.MCPConfigFilePath != expectedPath {
-		t.Errorf("Expected default MCP config file path to be '%s', got '%s'", expectedPath, cfg.AI.MCPConfigFilePath)
+	// Test Database defaults
+	expectedDBPath := filepath.Join(os.Getenv("HOME"), ".mcp-cron", "mcp-cron.db")
+	if cfg.Database.Path != expectedDBPath {
+		t.Errorf("Expected default database path to be '%s', got '%s'", expectedDBPath, cfg.Database.Path)
+	}
+	if !cfg.Database.Enabled {
+		t.Errorf("Expected default database enabled to be true, got %v", cfg.Database.Enabled)
 	}
 }
 
@@ -103,11 +110,19 @@ func TestValidate(t *testing.T) {
 		t.Error("Expected error for invalid log level, got nil")
 	}
 
-	// Test invalid max tool iterations (zero)
-	invalidMaxIterations := DefaultConfig()
-	invalidMaxIterations.AI.MaxToolIterations = 0
-	if err := invalidMaxIterations.Validate(); err == nil {
-		t.Error("Expected error for zero max tool iterations, got nil")
+	// Test OpenWebUI validation with enabled but missing URL
+	invalidOpenWebUI := DefaultConfig()
+	invalidOpenWebUI.OpenWebUI.Enabled = true
+	invalidOpenWebUI.OpenWebUI.BaseURL = ""
+	if err := invalidOpenWebUI.Validate(); err == nil {
+		t.Error("Expected error for enabled OpenWebUI with missing base URL, got nil")
+	}
+
+	// Test OpenWebUI validation with invalid timeout
+	invalidOpenWebUITimeout := DefaultConfig()
+	invalidOpenWebUITimeout.OpenWebUI.RequestTimeout = 0
+	if err := invalidOpenWebUITimeout.Validate(); err == nil {
+		t.Error("Expected error for OpenWebUI request timeout < 1, got nil")
 	}
 }
 
@@ -122,11 +137,14 @@ func TestFromEnv(t *testing.T) {
 		"MCP_CRON_SCHEDULER_DEFAULT_TIMEOUT": os.Getenv("MCP_CRON_SCHEDULER_DEFAULT_TIMEOUT"),
 		"MCP_CRON_LOGGING_LEVEL":             os.Getenv("MCP_CRON_LOGGING_LEVEL"),
 		"MCP_CRON_LOGGING_FILE":              os.Getenv("MCP_CRON_LOGGING_FILE"),
-		"OPENAI_API_KEY":                     os.Getenv("OPENAI_API_KEY"),
-		"MCP_CRON_ENABLE_OPENAI_TESTS":       os.Getenv("MCP_CRON_ENABLE_OPENAI_TESTS"),
-		"MCP_CRON_AI_MODEL":                  os.Getenv("MCP_CRON_AI_MODEL"),
-		"MCP_CRON_AI_MAX_TOOL_ITERATIONS":    os.Getenv("MCP_CRON_AI_MAX_TOOL_ITERATIONS"),
-		"MCP_CRON_MCP_CONFIG_FILE_PATH":      os.Getenv("MCP_CRON_MCP_CONFIG_FILE_PATH"),
+		"MCP_CRON_OPENWEBUI_BASE_URL":        os.Getenv("MCP_CRON_OPENWEBUI_BASE_URL"),
+		"MCP_CRON_OPENWEBUI_API_KEY":         os.Getenv("MCP_CRON_OPENWEBUI_API_KEY"),
+		"MCP_CRON_OPENWEBUI_MODEL":           os.Getenv("MCP_CRON_OPENWEBUI_MODEL"),
+		"MCP_CRON_OPENWEBUI_USER_ID":         os.Getenv("MCP_CRON_OPENWEBUI_USER_ID"),
+		"MCP_CRON_OPENWEBUI_REQUEST_TIMEOUT": os.Getenv("MCP_CRON_OPENWEBUI_REQUEST_TIMEOUT"),
+		"MCP_CRON_OPENWEBUI_ENABLED":         os.Getenv("MCP_CRON_OPENWEBUI_ENABLED"),
+		"MCP_CRON_DATABASE_PATH":             os.Getenv("MCP_CRON_DATABASE_PATH"),
+		"MCP_CRON_DATABASE_ENABLED":          os.Getenv("MCP_CRON_DATABASE_ENABLED"),
 	}
 
 	// Restore environment variables after test
@@ -154,11 +172,14 @@ func TestFromEnv(t *testing.T) {
 	os.Setenv("MCP_CRON_SCHEDULER_DEFAULT_TIMEOUT", "5m")
 	os.Setenv("MCP_CRON_LOGGING_LEVEL", "debug")
 	os.Setenv("MCP_CRON_LOGGING_FILE", "/tmp/test.log")
-	os.Setenv("OPENAI_API_KEY", "test-key")
-	os.Setenv("MCP_CRON_ENABLE_OPENAI_TESTS", "true")
-	os.Setenv("MCP_CRON_AI_MODEL", "gpt-4-turbo")
-	os.Setenv("MCP_CRON_AI_MAX_TOOL_ITERATIONS", "30")
-	os.Setenv("MCP_CRON_MCP_CONFIG_FILE_PATH", "/tmp/mcp.json")
+	os.Setenv("MCP_CRON_OPENWEBUI_BASE_URL", "http://test-openwebui:3000")
+	os.Setenv("MCP_CRON_OPENWEBUI_API_KEY", "test-api-key")
+	os.Setenv("MCP_CRON_OPENWEBUI_MODEL", "test-model")
+	os.Setenv("MCP_CRON_OPENWEBUI_USER_ID", "test-user")
+	os.Setenv("MCP_CRON_OPENWEBUI_REQUEST_TIMEOUT", "120")
+	os.Setenv("MCP_CRON_OPENWEBUI_ENABLED", "true")
+	os.Setenv("MCP_CRON_DATABASE_PATH", "/tmp/test.db")
+	os.Setenv("MCP_CRON_DATABASE_ENABLED", "true")
 
 	// Create a new config and apply environment variables
 	cfg := DefaultConfig()
@@ -189,20 +210,29 @@ func TestFromEnv(t *testing.T) {
 	if cfg.Logging.FilePath != "/tmp/test.log" {
 		t.Errorf("Expected log file path '/tmp/test.log', got '%s'", cfg.Logging.FilePath)
 	}
-	if cfg.AI.OpenAIAPIKey != "test-key" {
-		t.Errorf("Expected OpenAI API key 'test-key', got '%s'", cfg.AI.OpenAIAPIKey)
+	if cfg.OpenWebUI.BaseURL != "http://test-openwebui:3000" {
+		t.Errorf("Expected OpenWebUI base URL 'http://test-openwebui:3000', got '%s'", cfg.OpenWebUI.BaseURL)
 	}
-	if !cfg.AI.EnableOpenAITests {
-		t.Errorf("Expected EnableOpenAITests true, got false")
+	if cfg.OpenWebUI.APIKey != "test-api-key" {
+		t.Errorf("Expected OpenWebUI API key 'test-api-key', got '%s'", cfg.OpenWebUI.APIKey)
 	}
-	if cfg.AI.Model != "gpt-4-turbo" {
-		t.Errorf("Expected AI model 'gpt-4-turbo', got '%s'", cfg.AI.Model)
+	if cfg.OpenWebUI.Model != "test-model" {
+		t.Errorf("Expected OpenWebUI model 'test-model', got '%s'", cfg.OpenWebUI.Model)
 	}
-	if cfg.AI.MaxToolIterations != 30 {
-		t.Errorf("Expected max tool iterations 30, got %d", cfg.AI.MaxToolIterations)
+	if cfg.OpenWebUI.UserID != "test-user" {
+		t.Errorf("Expected OpenWebUI user ID 'test-user', got '%s'", cfg.OpenWebUI.UserID)
 	}
-	if cfg.AI.MCPConfigFilePath != "/tmp/mcp.json" {
-		t.Errorf("Expected MCP config file path '/tmp/mcp.json', got '%s'", cfg.AI.MCPConfigFilePath)
+	if cfg.OpenWebUI.RequestTimeout != 120 {
+		t.Errorf("Expected OpenWebUI request timeout 120, got %d", cfg.OpenWebUI.RequestTimeout)
+	}
+	if !cfg.OpenWebUI.Enabled {
+		t.Errorf("Expected OpenWebUI enabled true, got false")
+	}
+	if cfg.Database.Path != "/tmp/test.db" {
+		t.Errorf("Expected database path '/tmp/test.db', got '%s'", cfg.Database.Path)
+	}
+	if !cfg.Database.Enabled {
+		t.Errorf("Expected database enabled true, got false")
 	}
 
 	// Test invalid port format
@@ -221,11 +251,11 @@ func TestFromEnv(t *testing.T) {
 		t.Errorf("Expected default timeout to remain 10m for invalid input, got %s", cfg.Scheduler.DefaultTimeout)
 	}
 
-	// Test invalid max tool iterations format
-	os.Setenv("MCP_CRON_AI_MAX_TOOL_ITERATIONS", "invalid")
+	// Test invalid request timeout format
+	os.Setenv("MCP_CRON_OPENWEBUI_REQUEST_TIMEOUT", "invalid")
 	cfg = DefaultConfig()
 	FromEnv(cfg)
-	if cfg.AI.MaxToolIterations != 20 {
-		t.Errorf("Expected max tool iterations to remain 20 for invalid input, got %d", cfg.AI.MaxToolIterations)
+	if cfg.OpenWebUI.RequestTimeout != 60 {
+		t.Errorf("Expected OpenWebUI request timeout to remain 60 for invalid input, got %d", cfg.OpenWebUI.RequestTimeout)
 	}
 }

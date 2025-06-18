@@ -20,25 +20,21 @@ import (
 )
 
 var (
-	address         = flag.String("address", "", "The address to bind the server to")
-	port            = flag.Int("port", 0, "The port to bind the server to")
-	transport       = flag.String("transport", "", "Transport mode: sse or stdio")
-	logLevel        = flag.String("log-level", "", "Logging level: debug, info, warn, error, fatal")
-	logFile         = flag.String("log-file", "", "Log file path (default: stdout)")
-	version         = flag.Bool("version", false, "Show version information and exit")
-	aiModel         = flag.String("ai-model", "", "AI model to use for AI tasks (default: gpt-4o)")
-	aiMaxIterations = flag.Int("ai-max-iterations", 0, "Maximum iterations for tool-enabled AI tasks (default: 20)")
-	mcpConfigPath   = flag.String("mcp-config-path", "", "Path to MCP configuration file (default: ~/.cursor/mcp.json)")
-	dbPath          = flag.String("db-path", "", "Path to SQLite database file")
-	disableDB       = flag.Bool("disable-db", false, "Disable database persistence")
+	address   = flag.String("address", "", "The address to bind the server to")
+	port      = flag.Int("port", 0, "The port to bind the server to")
+	transport = flag.String("transport", "", "Transport mode: sse or stdio")
+	logLevel  = flag.String("log-level", "", "Logging level: debug, info, warn, error, fatal")
+	logFile   = flag.String("log-file", "", "Log file path (default: stdout)")
+	version   = flag.Bool("version", false, "Show version information and exit")
+	dbPath    = flag.String("db-path", "", "Path to SQLite database file")
+	disableDB = flag.Bool("disable-db", false, "Disable database persistence")
 
-	// AI provider flags
-	aiProvider      = flag.String("ai-provider", "", "AI provider: ollama, openrouter, openai (default: ollama)")
-	ollamaHost      = flag.String("ollama-host", "", "Ollama host (default: desk)")
-	ollamaPort      = flag.Int("ollama-port", 0, "Ollama port (default: 11434)")
-	ollamaModel     = flag.String("ollama-model", "", "Ollama model (default: qwen3:14b)")
-	openrouterKey   = flag.String("openrouter-key", "", "OpenRouter API key")
-	openrouterModel = flag.String("openrouter-model", "", "OpenRouter model (default: anthropic/claude-3.5-sonnet)")
+	// OpenWebUI flags
+	openwebuiURL     = flag.String("openwebui-url", "", "OpenWebUI base URL (default: http://localhost:3000)")
+	openwebuiAPIKey  = flag.String("openwebui-api-key", "", "OpenWebUI API key")
+	openwebuiModel   = flag.String("openwebui-model", "", "OpenWebUI model to use for AI tasks")
+	openwebuiUserID  = flag.String("openwebui-user-id", "", "OpenWebUI user ID (default: scheduler)")
+	disableOpenWebUI = flag.Bool("disable-openwebui", false, "Disable OpenWebUI integration")
 )
 
 func main() {
@@ -108,15 +104,6 @@ func applyCommandLineFlagsToConfig(cfg *config.Config) {
 	if *logFile != "" {
 		cfg.Logging.FilePath = *logFile
 	}
-	if *aiModel != "" {
-		cfg.AI.Model = *aiModel
-	}
-	if *aiMaxIterations > 0 {
-		cfg.AI.MaxToolIterations = *aiMaxIterations
-	}
-	if *mcpConfigPath != "" {
-		cfg.AI.MCPConfigFilePath = *mcpConfigPath
-	}
 	if *dbPath != "" {
 		cfg.Database.Path = *dbPath
 	}
@@ -124,24 +111,21 @@ func applyCommandLineFlagsToConfig(cfg *config.Config) {
 		cfg.Database.Enabled = false
 	}
 
-	// AI provider flags
-	if *aiProvider != "" {
-		cfg.AI.Provider = *aiProvider
+	// OpenWebUI flags
+	if *openwebuiURL != "" {
+		cfg.OpenWebUI.BaseURL = *openwebuiURL
 	}
-	if *ollamaHost != "" {
-		cfg.AI.OllamaHost = *ollamaHost
+	if *openwebuiAPIKey != "" {
+		cfg.OpenWebUI.APIKey = *openwebuiAPIKey
 	}
-	if *ollamaPort != 0 {
-		cfg.AI.OllamaPort = *ollamaPort
+	if *openwebuiModel != "" {
+		cfg.OpenWebUI.Model = *openwebuiModel
 	}
-	if *ollamaModel != "" {
-		cfg.AI.OllamaModel = *ollamaModel
+	if *openwebuiUserID != "" {
+		cfg.OpenWebUI.UserID = *openwebuiUserID
 	}
-	if *openrouterKey != "" {
-		cfg.AI.OpenRouterAPIKey = *openrouterKey
-	}
-	if *openrouterModel != "" {
-		cfg.AI.OpenRouterModel = *openrouterModel
+	if *disableOpenWebUI {
+		cfg.OpenWebUI.Enabled = false
 	}
 }
 

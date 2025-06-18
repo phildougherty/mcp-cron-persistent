@@ -23,7 +23,6 @@ type TestAgentExecutor struct {
 func NewTestAgentExecutor(mockFunc func(ctx context.Context, t *model.Task, cfg *config.Config) (string, error)) *TestAgentExecutor {
 	// Create a default config for testing
 	cfg := config.DefaultConfig()
-
 	return &TestAgentExecutor{
 		AgentExecutor: NewAgentExecutor(cfg),
 		mockRunTask:   mockFunc,
@@ -64,7 +63,6 @@ func (tae *TestAgentExecutor) ExecuteAgentTask(
 	// Update result fields
 	result.EndTime = time.Now()
 	result.Duration = result.EndTime.Sub(result.StartTime).String()
-
 	if err != nil {
 		result.Error = err.Error()
 		result.ExitCode = 1
@@ -162,7 +160,6 @@ func (tae *TestAgentExecutor) Execute(ctx context.Context, task *model.Task, tim
 	if result.Error != "" {
 		return fmt.Errorf(result.Error)
 	}
-
 	return nil
 }
 
@@ -202,26 +199,28 @@ func TestExecute(t *testing.T) {
 	}
 }
 
-// TestRunTaskIntegration updates the integration test to use config
+// TestRunTaskIntegration tests integration with OpenWebUI (mocked)
 func TestRunTaskIntegration(t *testing.T) {
 	// Skip by default to avoid making actual API calls during routine testing
-	if os.Getenv("MCP_CRON_ENABLE_OPENAI_TESTS") != "true" {
-		t.Skip("Skipping OpenAI integration test. Set MCP_CRON_ENABLE_OPENAI_TESTS=true to run.")
+	if os.Getenv("MCP_CRON_ENABLE_OPENWEBUI_TESTS") != "true" {
+		t.Skip("Skipping OpenWebUI integration test. Set MCP_CRON_ENABLE_OPENWEBUI_TESTS=true to run.")
 	}
 
 	// Create a default config for testing
 	cfg := config.DefaultConfig()
 
-	// Set the API key from environment for the test
-	cfg.AI.OpenAIAPIKey = os.Getenv("OPENAI_API_KEY")
-	if cfg.AI.OpenAIAPIKey == "" {
-		t.Skip("OPENAI_API_KEY environment variable not set")
+	// Configure OpenWebUI settings for testing
+	cfg.OpenWebUI.BaseURL = os.Getenv("MCP_CRON_OPENWEBUI_BASE_URL")
+	cfg.OpenWebUI.APIKey = os.Getenv("MCP_CRON_OPENWEBUI_API_KEY")
+
+	if cfg.OpenWebUI.BaseURL == "" {
+		t.Skip("MCP_CRON_OPENWEBUI_BASE_URL environment variable not set")
 	}
 
 	// Create a simple task
 	task := &model.Task{
 		ID:     "integration-test",
-		Prompt: "What is 2+2? Answer with just the number",
+		Prompt: "What is 2+2? Answer with just the number.",
 	}
 
 	// Run the task
@@ -235,8 +234,8 @@ func TestRunTaskIntegration(t *testing.T) {
 
 	// Verify we got some kind of response
 	if output == "" {
-		t.Error("Expected non-empty output from OpenAI API")
+		t.Error("Expected non-empty output from OpenWebUI API")
 	}
 
-	t.Logf("OpenAI API response: %s", output)
+	t.Logf("OpenWebUI API response: %s", output)
 }
