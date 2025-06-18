@@ -54,16 +54,30 @@ type LoggingConfig struct {
 
 // AIConfig holds AI-specific configuration
 type AIConfig struct {
-	// OpenAI API key
+	// Primary LLM provider (ollama, openrouter, openai)
+	Provider string
+
+	// Ollama configuration
+	OllamaHost  string
+	OllamaPort  int
+	OllamaModel string
+
+	// OpenRouter configuration
+	OpenRouterAPIKey string
+	OpenRouterModel  string
+	OpenRouterURL    string
+
+	// OpenAI configuration (legacy/fallback)
 	OpenAIAPIKey string
-	// Enable OpenAI integration tests
+	Model        string // Legacy field for backwards compatibility
+
+	// General AI settings
 	EnableOpenAITests bool
-	// LLM model to use for AI tasks
-	Model string
-	// Maximum iterations for tool-enabled tasks
 	MaxToolIterations int
-	// File path for the MCP configuration
 	MCPConfigFilePath string
+
+	// Request timeout (in seconds)
+	RequestTimeout int
 }
 
 // DatabaseConfig holds database-specific configuration
@@ -92,17 +106,30 @@ func DefaultConfig() *Config {
 			FilePath: "",
 		},
 		AI: AIConfig{
+			Provider:          "ollama", // Default to Ollama
+			OllamaHost:        "desk",   // Default to desk
+			OllamaPort:        11434,
+			OllamaModel:       "qwen3:14b",
+			OpenRouterAPIKey:  "",
+			OpenRouterModel:   "anthropic/claude-3.5-sonnet",
+			OpenRouterURL:     "https://openrouter.ai/api/v1/chat/completions",
 			OpenAIAPIKey:      "",
+			Model:             "gpt-4o", // Legacy field
 			EnableOpenAITests: false,
-			Model:             "gpt-4o",
 			MaxToolIterations: 20,
 			MCPConfigFilePath: filepath.Join(os.Getenv("HOME"), ".cursor", "mcp.json"),
+			RequestTimeout:    30, // 30 seconds
 		},
 		Database: DatabaseConfig{
 			Path:    filepath.Join(os.Getenv("HOME"), ".mcp-cron", "mcp-cron.db"),
 			Enabled: true,
 		},
 	}
+}
+
+// GetOllamaEndpoint returns the full Ollama endpoint URL
+func (a *AIConfig) GetOllamaEndpoint() string {
+	return fmt.Sprintf("http://%s:%d", a.OllamaHost, a.OllamaPort)
 }
 
 // Validate checks if the configuration is valid
@@ -131,6 +158,39 @@ func (c *Config) Validate() error {
 	// Validate AI config
 	if c.AI.MaxToolIterations < 1 {
 		return fmt.Errorf("max tool iterations must be at least 1")
+	}
+
+	// Validate AI provider
+	switch strings.ToLower(c.AI.Provider) {
+	case "ollama", "openrouter", "openai":
+		// Valid providers
+	default:
+		return fmt.Errorf("AI provider must be one of: ollama, openrouter, openai")
+	}
+
+	// Validate provider-specific configs
+	switch strings.ToLower(c.AI.Provider) {
+	case "openrouter":
+		if c.AI.OpenRouterAPIKey == "" {
+			return fmt.Errorf("OpenRouter API key is required when using openrouter provider")
+		}
+		if c.AI.OpenRouterModel == "" {
+			return fmt.Errorf("OpenRouter model is required when using openrouter provider")
+		}
+	case "openai":
+		if c.AI.OpenAIAPIKey == "" {
+			return fmt.Errorf("OpenAI API key is required when using openai provider")
+		}
+	case "ollama":
+		if c.AI.OllamaHost == "" {
+			return fmt.Errorf("ollama host is required when using ollama provider")
+		}
+		if c.AI.OllamaPort <= 0 || c.AI.OllamaPort > 65535 {
+			return fmt.Errorf("ollama port must be between 1 and 65535")
+		}
+		if c.AI.OllamaModel == "" {
+			return fmt.Errorf("ollama model is required when using ollama provider")
+		}
 	}
 
 	// Validate database config
@@ -182,6 +242,38 @@ func FromEnv(config *Config) {
 	}
 
 	// AI configuration
+	if val := os.Getenv("MCP_CRON_AI_PROVIDER"); val != "" {
+		config.AI.Provider = val
+	}
+
+	// Ollama configuration
+	if val := os.Getenv("MCP_CRON_OLLAMA_HOST"); val != "" {
+		config.AI.OllamaHost = val
+	}
+	if val := os.Getenv("MCP_CRON_OLLAMA_PORT"); val != "" {
+		if port, err := strconv.Atoi(val); err == nil {
+			config.AI.OllamaPort = port
+		}
+	}
+	if val := os.Getenv("MCP_CRON_OLLAMA_MODEL"); val != "" {
+		config.AI.OllamaModel = val
+	}
+
+	// OpenRouter configuration
+	if val := os.Getenv("OPENROUTER_API_KEY"); val != "" {
+		config.AI.OpenRouterAPIKey = val
+	}
+	if val := os.Getenv("MCP_CRON_OPENROUTER_API_KEY"); val != "" {
+		config.AI.OpenRouterAPIKey = val
+	}
+	if val := os.Getenv("MCP_CRON_OPENROUTER_MODEL"); val != "" {
+		config.AI.OpenRouterModel = val
+	}
+	if val := os.Getenv("MCP_CRON_OPENROUTER_URL"); val != "" {
+		config.AI.OpenRouterURL = val
+	}
+
+	// OpenAI configuration (legacy)
 	if val := os.Getenv("OPENAI_API_KEY"); val != "" {
 		config.AI.OpenAIAPIKey = val
 	}
@@ -198,6 +290,11 @@ func FromEnv(config *Config) {
 	}
 	if val := os.Getenv("MCP_CRON_MCP_CONFIG_FILE_PATH"); val != "" {
 		config.AI.MCPConfigFilePath = val
+	}
+	if val := os.Getenv("MCP_CRON_AI_REQUEST_TIMEOUT"); val != "" {
+		if timeout, err := strconv.Atoi(val); err == nil {
+			config.AI.RequestTimeout = timeout
+		}
 	}
 
 	// Database configuration

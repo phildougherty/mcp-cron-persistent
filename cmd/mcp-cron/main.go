@@ -31,6 +31,14 @@ var (
 	mcpConfigPath   = flag.String("mcp-config-path", "", "Path to MCP configuration file (default: ~/.cursor/mcp.json)")
 	dbPath          = flag.String("db-path", "", "Path to SQLite database file")
 	disableDB       = flag.Bool("disable-db", false, "Disable database persistence")
+
+	// AI provider flags
+	aiProvider      = flag.String("ai-provider", "", "AI provider: ollama, openrouter, openai (default: ollama)")
+	ollamaHost      = flag.String("ollama-host", "", "Ollama host (default: desk)")
+	ollamaPort      = flag.Int("ollama-port", 0, "Ollama port (default: 11434)")
+	ollamaModel     = flag.String("ollama-model", "", "Ollama model (default: qwen3:14b)")
+	openrouterKey   = flag.String("openrouter-key", "", "OpenRouter API key")
+	openrouterModel = flag.String("openrouter-model", "", "OpenRouter model (default: anthropic/claude-3.5-sonnet)")
 )
 
 func main() {
@@ -114,6 +122,26 @@ func applyCommandLineFlagsToConfig(cfg *config.Config) {
 	}
 	if *disableDB {
 		cfg.Database.Enabled = false
+	}
+
+	// AI provider flags
+	if *aiProvider != "" {
+		cfg.AI.Provider = *aiProvider
+	}
+	if *ollamaHost != "" {
+		cfg.AI.OllamaHost = *ollamaHost
+	}
+	if *ollamaPort != 0 {
+		cfg.AI.OllamaPort = *ollamaPort
+	}
+	if *ollamaModel != "" {
+		cfg.AI.OllamaModel = *ollamaModel
+	}
+	if *openrouterKey != "" {
+		cfg.AI.OpenRouterAPIKey = *openrouterKey
+	}
+	if *openrouterModel != "" {
+		cfg.AI.OpenRouterModel = *openrouterModel
 	}
 }
 
