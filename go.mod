@@ -6,7 +6,6 @@ toolchain go1.23.8
 
 require (
 	github.com/ThinkInAIXYZ/go-mcp v0.1.14
-	github.com/openai/openai-go v0.1.0-beta.10
 	github.com/robfig/cron/v3 v3.0.1
 	modernc.org/sqlite v1.29.5
 )
@@ -22,7 +21,6 @@ require (
 	github.com/tidwall/gjson v1.18.0 // indirect
 	github.com/tidwall/match v1.1.1 // indirect
 	github.com/tidwall/pretty v1.2.1 // indirect
-	github.com/tidwall/sjson v1.2.5 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	golang.org/x/sys v0.29.0 // indirect
 	modernc.org/gc/v3 v3.0.0-20240107210532-573471604cb6 // indirect

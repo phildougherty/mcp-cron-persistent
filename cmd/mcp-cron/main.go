@@ -30,10 +30,10 @@ var (
 	disableDB = flag.Bool("disable-db", false, "Disable database persistence")
 
 	// OpenWebUI flags
-	openwebuiURL     = flag.String("openwebui-url", "", "OpenWebUI base URL (default: http://localhost:3000)")
+	openwebuiURL     = flag.String("openwebui-url", "", "OpenWebUI base URL")
 	openwebuiAPIKey  = flag.String("openwebui-api-key", "", "OpenWebUI API key")
 	openwebuiModel   = flag.String("openwebui-model", "", "OpenWebUI model to use for AI tasks")
-	openwebuiUserID  = flag.String("openwebui-user-id", "", "OpenWebUI user ID (default: scheduler)")
+	openwebuiUserID  = flag.String("openwebui-user-id", "", "OpenWebUI user ID")
 	disableOpenWebUI = flag.Bool("disable-openwebui", false, "Disable OpenWebUI integration")
 )
 
