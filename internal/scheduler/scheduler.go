@@ -13,6 +13,16 @@ import (
 	"github.com/robfig/cron/v3"
 )
 
+// Storage interface for persistence
+type Storage interface {
+	SaveTask(task *model.Task) error
+	LoadTask(id string) (*model.Task, error)
+	LoadAllTasks() ([]*model.Task, error)
+	DeleteTask(id string) error
+	SaveTaskResult(result *model.Result) error
+	Close() error
+}
+
 // Scheduler manages cron tasks
 type Scheduler struct {
 	cron         *cron.Cron
@@ -21,6 +31,7 @@ type Scheduler struct {
 	mu           sync.RWMutex
 	taskExecutor model.Executor
 	config       *config.SchedulerConfig
+	storage      Storage
 }
 
 // NewScheduler creates a new scheduler instance
@@ -43,6 +54,54 @@ func NewScheduler(cfg *config.SchedulerConfig) *Scheduler {
 	return scheduler
 }
 
+// SetStorage sets the storage backend for persistence
+func (s *Scheduler) SetStorage(storage Storage) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.storage = storage
+
+	// Load existing tasks from storage
+	if storage != nil {
+		return s.loadTasksFromStorage()
+	}
+
+	return nil
+}
+
+// loadTasksFromStorage loads all tasks from persistent storage
+func (s *Scheduler) loadTasksFromStorage() error {
+	tasks, err := s.storage.LoadAllTasks()
+	if err != nil {
+		return fmt.Errorf("failed to load tasks from storage: %w", err)
+	}
+
+	for _, task := range tasks {
+		s.tasks[task.ID] = task
+
+		// Schedule enabled tasks
+		if task.Enabled && s.taskExecutor != nil {
+			if scheduleErr := s.scheduleTask(task); scheduleErr != nil {
+				// Log error but continue loading other tasks
+				fmt.Printf("Failed to schedule task %s: %v\n", task.ID, scheduleErr)
+				task.Status = model.StatusFailed
+				s.saveTaskToStorage(task) // Save the failed status
+			}
+		}
+	}
+
+	return nil
+}
+
+// saveTaskToStorage saves a task to persistent storage if available
+func (s *Scheduler) saveTaskToStorage(task *model.Task) {
+	if s.storage != nil {
+		if err := s.storage.SaveTask(task); err != nil {
+			fmt.Printf("Failed to save task %s to storage: %v\n", task.ID, err)
+		}
+	}
+}
+
 // Start begins the scheduler
 func (s *Scheduler) Start(ctx context.Context) {
 	s.cron.Start()
@@ -51,8 +110,6 @@ func (s *Scheduler) Start(ctx context.Context) {
 	go func() {
 		<-ctx.Done()
 		if err := s.Stop(); err != nil {
-			// We cannot return the error here since we're in a goroutine,
-			// so we'll just log it
 			fmt.Printf("Error stopping scheduler: %v\n", err)
 		}
 	}()
@@ -61,6 +118,12 @@ func (s *Scheduler) Start(ctx context.Context) {
 // Stop halts the scheduler
 func (s *Scheduler) Stop() error {
 	s.cron.Stop()
+
+	// Close storage if available
+	if s.storage != nil {
+		return s.storage.Close()
+	}
+
 	return nil
 }
 
@@ -73,14 +136,18 @@ func (s *Scheduler) AddTask(task *model.Task) error {
 		return errors.AlreadyExists("task", task.ID)
 	}
 
-	// Store the task
+	// Store the task in memory
 	s.tasks[task.ID] = task
+
+	// Save to persistent storage
+	s.saveTaskToStorage(task)
 
 	if task.Enabled {
 		err := s.scheduleTask(task)
 		if err != nil {
 			// If scheduling fails, set the task status to failed
 			task.Status = model.StatusFailed
+			s.saveTaskToStorage(task)
 			return err
 		}
 	}
@@ -102,6 +169,13 @@ func (s *Scheduler) RemoveTask(taskID string) error {
 	if entryID, exists := s.entryIDs[taskID]; exists {
 		s.cron.Remove(entryID)
 		delete(s.entryIDs, taskID)
+	}
+
+	// Remove from storage
+	if s.storage != nil {
+		if err := s.storage.DeleteTask(taskID); err != nil {
+			return fmt.Errorf("failed to delete task from storage: %w", err)
+		}
 	}
 
 	// Remove the task from our map
@@ -131,9 +205,11 @@ func (s *Scheduler) EnableTask(taskID string) error {
 	if err != nil {
 		// If scheduling fails, set the task status to failed
 		task.Status = model.StatusFailed
+		s.saveTaskToStorage(task)
 		return err
 	}
 
+	s.saveTaskToStorage(task)
 	return nil
 }
 
@@ -160,6 +236,8 @@ func (s *Scheduler) DisableTask(taskID string) error {
 	task.Enabled = false
 	task.Status = model.StatusDisabled
 	task.UpdatedAt = time.Now()
+
+	s.saveTaskToStorage(task)
 	return nil
 }
 
@@ -211,6 +289,9 @@ func (s *Scheduler) UpdateTask(task *model.Task) error {
 	task.UpdatedAt = time.Now()
 	s.tasks[task.ID] = task
 
+	// Save to storage
+	s.saveTaskToStorage(task)
+
 	// If enabled, schedule it
 	if task.Enabled {
 		return s.scheduleTask(task)
@@ -248,19 +329,40 @@ func (s *Scheduler) scheduleTask(task *model.Task) error {
 	jobFunc := func() {
 		task.LastRun = time.Now()
 		task.Status = model.StatusRunning
+		s.saveTaskToStorage(task)
 
 		// Execute the task
 		ctx := context.Background()
 		timeout := s.config.DefaultTimeout // Use the configured default timeout
 
+		// Create a result to track execution
+		result := &model.Result{
+			TaskID:    task.ID,
+			StartTime: time.Now(),
+		}
+
 		if err := s.taskExecutor.Execute(ctx, task, timeout); err != nil {
 			task.Status = model.StatusFailed
+			result.Error = err.Error()
+			result.ExitCode = 1
 		} else {
 			task.Status = model.StatusCompleted
+			result.ExitCode = 0
 		}
+
+		result.EndTime = time.Now()
+		result.Duration = result.EndTime.Sub(result.StartTime).String()
 
 		task.UpdatedAt = time.Now()
 		s.updateNextRunTime(task)
+		s.saveTaskToStorage(task)
+
+		// Save execution result if storage is available
+		if s.storage != nil {
+			if err := s.storage.SaveTaskResult(result); err != nil {
+				fmt.Printf("Failed to save task result: %v\n", err)
+			}
+		}
 	}
 
 	// Add the job to cron

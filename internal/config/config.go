@@ -14,31 +14,26 @@ import (
 type Config struct {
 	// Server configuration
 	Server ServerConfig
-
 	// Scheduler configuration
 	Scheduler SchedulerConfig
-
 	// Logging configuration
 	Logging LoggingConfig
-
 	// AI configuration
 	AI AIConfig
+	// Database configuration
+	Database DatabaseConfig
 }
 
 // ServerConfig holds server-specific configuration
 type ServerConfig struct {
 	// Address to bind to
 	Address string
-
 	// Port to listen on
 	Port int
-
 	// Transport mode (sse, stdio)
 	TransportMode string
-
 	// Server name
 	Name string
-
 	// Server version
 	Version string
 }
@@ -53,7 +48,6 @@ type SchedulerConfig struct {
 type LoggingConfig struct {
 	// Log level (debug, info, warn, error, fatal)
 	Level string
-
 	// Log file path (optional)
 	FilePath string
 }
@@ -62,18 +56,22 @@ type LoggingConfig struct {
 type AIConfig struct {
 	// OpenAI API key
 	OpenAIAPIKey string
-
 	// Enable OpenAI integration tests
 	EnableOpenAITests bool
-
 	// LLM model to use for AI tasks
 	Model string
-
 	// Maximum iterations for tool-enabled tasks
 	MaxToolIterations int
-
 	// File path for the MCP configuration
 	MCPConfigFilePath string
+}
+
+// DatabaseConfig holds database-specific configuration
+type DatabaseConfig struct {
+	// SQLite database path
+	Path string
+	// Enable database persistence
+	Enabled bool
 }
 
 // DefaultConfig returns the default configuration
@@ -100,6 +98,10 @@ func DefaultConfig() *Config {
 			MaxToolIterations: 20,
 			MCPConfigFilePath: filepath.Join(os.Getenv("HOME"), ".cursor", "mcp.json"),
 		},
+		Database: DatabaseConfig{
+			Path:    filepath.Join(os.Getenv("HOME"), ".mcp-cron", "mcp-cron.db"),
+			Enabled: true,
+		},
 	}
 }
 
@@ -109,7 +111,6 @@ func (c *Config) Validate() error {
 	if c.Server.Port < 0 || c.Server.Port > 65535 {
 		return fmt.Errorf("server port must be between 0 and 65535")
 	}
-
 	if c.Server.TransportMode != "sse" && c.Server.TransportMode != "stdio" {
 		return fmt.Errorf("transport mode must be either 'sse' or 'stdio'")
 	}
@@ -132,6 +133,15 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("max tool iterations must be at least 1")
 	}
 
+	// Validate database config
+	if c.Database.Enabled {
+		// Ensure database directory exists
+		dbDir := filepath.Dir(c.Database.Path)
+		if err := os.MkdirAll(dbDir, 0755); err != nil {
+			return fmt.Errorf("failed to create database directory %s: %w", dbDir, err)
+		}
+	}
+
 	return nil
 }
 
@@ -141,21 +151,17 @@ func FromEnv(config *Config) {
 	if val := os.Getenv("MCP_CRON_SERVER_ADDRESS"); val != "" {
 		config.Server.Address = val
 	}
-
 	if val := os.Getenv("MCP_CRON_SERVER_PORT"); val != "" {
 		if port, err := strconv.Atoi(val); err == nil {
 			config.Server.Port = port
 		}
 	}
-
 	if val := os.Getenv("MCP_CRON_SERVER_TRANSPORT"); val != "" {
 		config.Server.TransportMode = val
 	}
-
 	if val := os.Getenv("MCP_CRON_SERVER_NAME"); val != "" {
 		config.Server.Name = val
 	}
-
 	if val := os.Getenv("MCP_CRON_SERVER_VERSION"); val != "" {
 		config.Server.Version = val
 	}
@@ -171,7 +177,6 @@ func FromEnv(config *Config) {
 	if val := os.Getenv("MCP_CRON_LOGGING_LEVEL"); val != "" {
 		config.Logging.Level = val
 	}
-
 	if val := os.Getenv("MCP_CRON_LOGGING_FILE"); val != "" {
 		config.Logging.FilePath = val
 	}
@@ -180,22 +185,26 @@ func FromEnv(config *Config) {
 	if val := os.Getenv("OPENAI_API_KEY"); val != "" {
 		config.AI.OpenAIAPIKey = val
 	}
-
 	if val := os.Getenv("MCP_CRON_ENABLE_OPENAI_TESTS"); val != "" {
 		config.AI.EnableOpenAITests = strings.ToLower(val) == "true"
 	}
-
 	if val := os.Getenv("MCP_CRON_AI_MODEL"); val != "" {
 		config.AI.Model = val
 	}
-
 	if val := os.Getenv("MCP_CRON_AI_MAX_TOOL_ITERATIONS"); val != "" {
 		if iterations, err := strconv.Atoi(val); err == nil {
 			config.AI.MaxToolIterations = iterations
 		}
 	}
-
 	if val := os.Getenv("MCP_CRON_MCP_CONFIG_FILE_PATH"); val != "" {
 		config.AI.MCPConfigFilePath = val
+	}
+
+	// Database configuration
+	if val := os.Getenv("MCP_CRON_DATABASE_PATH"); val != "" {
+		config.Database.Path = val
+	}
+	if val := os.Getenv("MCP_CRON_DATABASE_ENABLED"); val != "" {
+		config.Database.Enabled = strings.ToLower(val) == "true"
 	}
 }

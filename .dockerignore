@@ -1,0 +1,41 @@
+# Git
+.git/
+.gitignore
+
+# Documentation
+README.md
+LICENSE
+
+# Build artifacts
+/mcp-cron
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test files
+*_test.go
+testdata/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Dependency directories
+vendor/
+
+# Local data
+data/
+*.db
+*.log
+
+# Docker files (except Dockerfile itself)
+docker-compose.yml
+.dockerignore

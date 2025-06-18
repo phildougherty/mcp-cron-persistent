@@ -16,6 +16,7 @@ import (
 	"github.com/jolks/mcp-cron/internal/logging"
 	"github.com/jolks/mcp-cron/internal/scheduler"
 	"github.com/jolks/mcp-cron/internal/server"
+	"github.com/jolks/mcp-cron/internal/storage"
 )
 
 var (
@@ -28,6 +29,8 @@ var (
 	aiModel         = flag.String("ai-model", "", "AI model to use for AI tasks (default: gpt-4o)")
 	aiMaxIterations = flag.Int("ai-max-iterations", 0, "Maximum iterations for tool-enabled AI tasks (default: 20)")
 	mcpConfigPath   = flag.String("mcp-config-path", "", "Path to MCP configuration file (default: ~/.cursor/mcp.json)")
+	dbPath          = flag.String("db-path", "", "Path to SQLite database file")
+	disableDB       = flag.Bool("disable-db", false, "Disable database persistence")
 )
 
 func main() {
@@ -106,6 +109,12 @@ func applyCommandLineFlagsToConfig(cfg *config.Config) {
 	if *mcpConfigPath != "" {
 		cfg.AI.MCPConfigFilePath = *mcpConfigPath
 	}
+	if *dbPath != "" {
+		cfg.Database.Path = *dbPath
+	}
+	if *disableDB {
+		cfg.Database.Enabled = false
+	}
 }
 
 // Application represents the running application
@@ -115,6 +124,8 @@ type Application struct {
 	agentExecutor *agent.AgentExecutor
 	server        *server.MCPServer
 	logger        *logging.Logger
+	storage       *storage.SQLiteStorage
+	dbPath        string // Store the database path for logging
 }
 
 // createApp creates a new application instance
@@ -124,9 +135,30 @@ func createApp(cfg *config.Config) (*Application, error) {
 	agentExec := agent.NewAgentExecutor(cfg)
 	sched := scheduler.NewScheduler(&cfg.Scheduler)
 
+	// Initialize storage if enabled
+	var sqliteStorage *storage.SQLiteStorage
+	var dbPath string
+	if cfg.Database.Enabled {
+		var err error
+		dbPath = cfg.Database.Path
+		sqliteStorage, err = storage.NewSQLiteStorage(dbPath)
+		if err != nil {
+			return nil, err
+		}
+
+		// Set storage for the scheduler
+		if err := sched.SetStorage(sqliteStorage); err != nil {
+			sqliteStorage.Close()
+			return nil, err
+		}
+	}
+
 	// Create the MCP server
 	mcpServer, err := server.NewMCPServer(cfg, sched, cmdExec, agentExec)
 	if err != nil {
+		if sqliteStorage != nil {
+			sqliteStorage.Close()
+		}
 		return nil, err
 	}
 
@@ -140,6 +172,8 @@ func createApp(cfg *config.Config) (*Application, error) {
 		agentExecutor: agentExec,
 		server:        mcpServer,
 		logger:        logger,
+		storage:       sqliteStorage,
+		dbPath:        dbPath,
 	}
 
 	return app, nil
@@ -150,6 +184,10 @@ func (a *Application) Start(ctx context.Context) error {
 	// Start the scheduler
 	a.scheduler.Start(ctx)
 	a.logger.Infof("Task scheduler started")
+
+	if a.storage != nil {
+		a.logger.Infof("SQLite persistence enabled at: %s", a.dbPath)
+	}
 
 	// Start the MCP server
 	if err := a.server.Start(ctx); err != nil {
@@ -175,6 +213,15 @@ func (a *Application) Stop() error {
 		return err
 	}
 	a.logger.Infof("MCP server stopped")
+
+	// Close storage
+	if a.storage != nil {
+		if err := a.storage.Close(); err != nil {
+			a.logger.Errorf("Error closing storage: %v", err)
+			return err
+		}
+		a.logger.Infof("Storage closed")
+	}
 
 	return nil
 }
