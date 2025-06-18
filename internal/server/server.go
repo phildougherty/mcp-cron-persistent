@@ -81,7 +81,6 @@ func NewMCPServer(cfg *config.Config, scheduler *scheduler.Scheduler, cmdExecuto
 
 	// Initialize logger
 	var logger *logging.Logger
-
 	if cfg.Logging.FilePath != "" {
 		var err error
 		logger, err = logging.FileLogger(cfg.Logging.FilePath, parseLogLevel(cfg.Logging.Level))
@@ -102,7 +101,6 @@ func NewMCPServer(cfg *config.Config, scheduler *scheduler.Scheduler, cmdExecuto
 		// For stdio transport, we need to be careful with logging
 		// as it could interfere with JSON-RPC messages
 		// Redirect logs to a file instead of stdout
-
 		// Get the executable path
 		execPath, err := os.Executable()
 		if err != nil {
@@ -138,13 +136,12 @@ func NewMCPServer(cfg *config.Config, scheduler *scheduler.Scheduler, cmdExecuto
 		logger:        logger,
 	}
 
-	// Set up task routing
-	scheduler.SetTaskExecutor(mcpServer)
+	// NOTE: Do NOT set task executor here - it will be set in main.go
+	// This prevents the circular dependency issue
 
 	// Create transport based on mode
 	var svrTransport transport.ServerTransport
 	var err error
-
 	switch cfg.Server.TransportMode {
 	case "stdio":
 		// Create stdio transport
@@ -154,7 +151,6 @@ func NewMCPServer(cfg *config.Config, scheduler *scheduler.Scheduler, cmdExecuto
 		// Create HTTP SSE transport
 		addr := fmt.Sprintf("%s:%d", cfg.Server.Address, cfg.Server.Port)
 		logger.Infof("Using SSE transport on %s", addr)
-
 		// Create SSE transport with the address
 		svrTransport, err = transport.NewSSEServerTransport(addr)
 		if err != nil {
@@ -187,7 +183,6 @@ func (s *MCPServer) Start(ctx context.Context) error {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-
 		// Start the server
 		if err := s.server.Run(); err != nil {
 			s.logger.Errorf("Error running MCP server: %v", err)
@@ -216,7 +211,6 @@ func (s *MCPServer) Stop() error {
 		s.logger.Debugf("Stop called but server is already shutting down, ignoring")
 		return nil
 	}
-
 	s.isShuttingDown = true
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -244,7 +238,6 @@ func (s *MCPServer) handleListTasks(_ *protocol.CallToolRequest) (*protocol.Call
 
 	// Get all tasks
 	tasks := s.scheduler.ListTasks()
-
 	return createTasksResponse(tasks)
 }
 
@@ -271,7 +264,6 @@ func (s *MCPServer) handleGetTask(request *protocol.CallToolRequest) (*protocol.
 func (s *MCPServer) handleAddTask(request *protocol.CallToolRequest) (*protocol.CallToolResult, error) {
 	// Extract parameters
 	var params TaskParams
-
 	if err := extractParams(request, &params); err != nil {
 		return createErrorResponse(err)
 	}
@@ -299,7 +291,6 @@ func (s *MCPServer) handleAddTask(request *protocol.CallToolRequest) (*protocol.
 func (s *MCPServer) handleAddAITask(request *protocol.CallToolRequest) (*protocol.CallToolResult, error) {
 	// Extract parameters
 	var params AITaskParams
-
 	if err := extractParams(request, &params); err != nil {
 		return createErrorResponse(err)
 	}
@@ -347,7 +338,6 @@ func createBaseTask(name, schedule, description string, enabled bool) *model.Tas
 func (s *MCPServer) handleUpdateTask(request *protocol.CallToolRequest) (*protocol.CallToolResult, error) {
 	// Extract parameters
 	var params AITaskParams
-
 	if err := extractParams(request, &params); err != nil {
 		return createErrorResponse(err)
 	}
@@ -487,18 +477,15 @@ func (s *MCPServer) Execute(ctx context.Context, task *model.Task, timeout time.
 
 	// Route to the appropriate executor based on task type
 	s.logger.Debugf("Executing task with type: %s", taskType)
-
 	switch taskType {
 	case model.TypeAI.String():
 		// Use the agent executor for AI tasks
 		s.logger.Infof("Routing to AgentExecutor for AI task")
 		return s.agentExecutor.Execute(ctx, task, timeout)
-
 	case model.TypeShellCommand.String(), "":
 		// Use the command executor for shell command tasks or when type is not specified
 		s.logger.Infof("Routing to CommandExecutor for shell command task")
 		return s.cmdExecutor.Execute(ctx, task, timeout)
-
 	default:
 		// Unknown task type
 		return fmt.Errorf("unknown task type: %s", taskType)

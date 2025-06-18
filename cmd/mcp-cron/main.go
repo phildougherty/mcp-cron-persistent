@@ -147,7 +147,16 @@ func createApp(cfg *config.Config) (*Application, error) {
 	agentExec := agent.NewAgentExecutor(cfg)
 	sched := scheduler.NewScheduler(&cfg.Scheduler)
 
-	// Initialize storage if enabled
+	// Create the MCP server
+	mcpServer, err := server.NewMCPServer(cfg, sched, cmdExec, agentExec)
+	if err != nil {
+		return nil, err
+	}
+
+	// CRITICAL: Set the task executor BEFORE setting storage
+	sched.SetTaskExecutor(mcpServer)
+
+	// Initialize storage if enabled (this will load and schedule existing tasks)
 	var sqliteStorage *storage.SQLiteStorage
 	var dbPath string
 	if cfg.Database.Enabled {
@@ -158,20 +167,11 @@ func createApp(cfg *config.Config) (*Application, error) {
 			return nil, err
 		}
 
-		// Set storage for the scheduler
+		// Set storage for the scheduler (this will load tasks from DB and schedule them)
 		if err := sched.SetStorage(sqliteStorage); err != nil {
 			sqliteStorage.Close()
 			return nil, err
 		}
-	}
-
-	// Create the MCP server
-	mcpServer, err := server.NewMCPServer(cfg, sched, cmdExec, agentExec)
-	if err != nil {
-		if sqliteStorage != nil {
-			sqliteStorage.Close()
-		}
-		return nil, err
 	}
 
 	// Get the default logger that was configured by the server
