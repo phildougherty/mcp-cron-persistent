@@ -82,6 +82,34 @@ func (s *MCPServer) registerToolsDeclarative() {
 			Handler:     s.handleSpawnAgent,
 			Parameters:  SpawnAgentParams{},
 		},
+		{
+			Name:        "list_run_status",
+			Description: "Lists recent task execution status and summaries",
+			Handler:     s.handleListRunStatus,
+			Parameters:  RunStatusParams{},
+		},
+		{
+			Name:        "get_run_output",
+			Description: "Gets detailed output from a specific task run",
+			Handler:     s.handleGetRunOutput,
+			Parameters:  RunOutputParams{},
+		},
+		{
+			Name:        "search_runs",
+			Description: "Searches task runs with filters (status, name, date)",
+			Handler:     s.handleSearchRuns,
+			Parameters:  RunSearchParams{},
+		},
+		{
+			Name:        "export_runs",
+			Description: "Exports run data in various formats (JSON, CSV, Markdown)",
+			Handler:     s.handleExportRuns,
+			Parameters: struct {
+				Format string `json:"format,omitempty" description:"export format: json, csv, markdown (default: json)"`
+				Since  string `json:"since,omitempty" description:"export runs since date (YYYY-MM-DD)"`
+				TaskID string `json:"task_id,omitempty" description:"filter by specific task ID"`
+			}{},
+		},
 	}
 
 	// Register all the tools

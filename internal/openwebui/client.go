@@ -13,7 +13,6 @@ import (
 
 	"github.com/jolks/mcp-cron/internal/config"
 	"github.com/jolks/mcp-cron/internal/logging"
-	"github.com/jolks/mcp-cron/internal/model"
 )
 
 // ChatRequest represents a chat request to OpenWebUI
@@ -49,25 +48,6 @@ type ChatResponse struct {
 	} `json:"usage"`
 }
 
-// ConversationRequest represents a request to create a conversation
-type ConversationRequest struct {
-	Title string `json:"title"`
-}
-
-// ConversationResponse represents a response when creating/getting a conversation
-type ConversationResponse struct {
-	ID        string    `json:"id"`
-	Title     string    `json:"title"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-}
-
-// ConversationMessageRequest represents a message to send to a conversation
-type ConversationMessageRequest struct {
-	Content string `json:"content"`
-	Role    string `json:"role"`
-}
-
 // Client represents an OpenWebUI API client
 type Client struct {
 	baseURL    string
@@ -88,56 +68,43 @@ func NewClient(cfg *config.OpenWebUIConfig, logger *logging.Logger) *Client {
 	}
 }
 
-// ExecuteAITask executes an AI task via OpenWebUI with conversation support
+// ExecuteAITask executes an AI task via OpenWebUI
 func (c *Client) ExecuteAITask(ctx context.Context, taskID, prompt, model, userID string) (string, error) {
-	return c.ExecuteAITaskWithConversation(ctx, taskID, prompt, model, userID, "")
-}
+	c.logger.Debugf("Executing AI task %s via OpenWebUI", taskID)
 
-// ExecuteAITaskWithConversation executes an AI task via OpenWebUI using a specific conversation
-func (c *Client) ExecuteAITaskWithConversation(ctx context.Context, taskID, prompt, model, userID, conversationID string) (string, error) {
-	c.logger.Debugf("Executing AI task %s via OpenWebUI with conversation %s", taskID, conversationID)
+	endpoint := c.baseURL + "/api/chat/completions"
 
-	var endpoint string
-	var requestBody []byte
-	var err error
+	// Build system prompt
+	systemPrompt := fmt.Sprintf(`You are executing a scheduled AI task.
 
-	if conversationID != "" {
-		// Use conversation-specific endpoint
-		endpoint = fmt.Sprintf("%s/api/v1/chats/%s", c.baseURL, conversationID)
+Task ID: %s
+You have access to the full MCP tool surface through the OpenAPI Tools Server.
+You can:
+- Schedule new tasks using add_task or add_ai_task  
+- Manage existing tasks with update_task, enable_task, disable_task
+- Query task status with get_task and list_tasks
+- Access all other available MCP tools
 
-		// Send message to existing conversation
-		messageReq := ConversationMessageRequest{
-			Content: c.buildContextualPrompt(taskID, prompt),
-			Role:    "user",
-		}
-		requestBody, err = json.Marshal(messageReq)
-		if err != nil {
-			return "", fmt.Errorf("failed to marshal conversation message request: %w", err)
-		}
-	} else {
-		// Use standard chat completion endpoint
-		endpoint = c.baseURL + "/api/chat/completions"
+Use your tools wisely to accomplish the task efficiently.`, taskID)
 
-		// Prepare the request - use the model if specified, otherwise let OpenWebUI use default
-		request := ChatRequest{
-			Model: model,
-			Messages: []Message{
-				{
-					Role:    "system",
-					Content: c.buildSystemPrompt(taskID),
-				},
-				{
-					Role:    "user",
-					Content: prompt,
-				},
+	request := ChatRequest{
+		Model: model,
+		Messages: []Message{
+			{
+				Role:    "system",
+				Content: systemPrompt,
 			},
-			Stream: false,
-		}
+			{
+				Role:    "user",
+				Content: prompt,
+			},
+		},
+		Stream: false,
+	}
 
-		requestBody, err = json.Marshal(request)
-		if err != nil {
-			return "", fmt.Errorf("failed to marshal request: %w", err)
-		}
+	requestBody, err := json.Marshal(request)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal request: %w", err)
 	}
 
 	// Create HTTP request
@@ -186,145 +153,12 @@ func (c *Client) ExecuteAITaskWithConversation(ctx context.Context, taskID, prom
 	return result, nil
 }
 
-// CreateConversation creates a new conversation in OpenWebUI
-func (c *Client) CreateConversation(ctx context.Context, title string) (*model.Conversation, error) {
-	c.logger.Debugf("Creating conversation with title: %s", title)
-
-	endpoint := c.baseURL + "/api/v1/chats"
-
-	reqBody := ConversationRequest{
-		Title: title,
-	}
-
-	jsonData, err := json.Marshal(reqBody)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal conversation request: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewBuffer(jsonData))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create conversation request: %w", err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	if c.apiKey != "" {
-		req.Header.Set("Authorization", "Bearer "+c.apiKey)
-	}
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create conversation: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read conversation response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to create conversation, status %d: %s", resp.StatusCode, string(body))
-	}
-
-	var convResp ConversationResponse
-	if err := json.Unmarshal(body, &convResp); err != nil {
-		return nil, fmt.Errorf("failed to parse conversation response: %w", err)
-	}
-
-	conversation := &model.Conversation{
-		ID:        convResp.ID,
-		Name:      convResp.Title,
-		CreatedAt: convResp.CreatedAt,
-		UpdatedAt: convResp.UpdatedAt,
-		LastUsed:  time.Now(),
-		Type:      "task",
-	}
-
-	c.logger.Infof("Created conversation %s with ID %s", title, conversation.ID)
-	return conversation, nil
-}
-
-// GetConversation retrieves an existing conversation
-func (c *Client) GetConversation(ctx context.Context, conversationID string) (*model.Conversation, error) {
-	endpoint := fmt.Sprintf("%s/api/v1/chats/%s", c.baseURL, conversationID)
-
-	req, err := http.NewRequestWithContext(ctx, "GET", endpoint, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create get conversation request: %w", err)
-	}
-
-	if c.apiKey != "" {
-		req.Header.Set("Authorization", "Bearer "+c.apiKey)
-	}
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get conversation: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusNotFound {
-		return nil, fmt.Errorf("conversation not found")
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read conversation response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to get conversation, status %d: %s", resp.StatusCode, string(body))
-	}
-
-	var convResp ConversationResponse
-	if err := json.Unmarshal(body, &convResp); err != nil {
-		return nil, fmt.Errorf("failed to parse conversation response: %w", err)
-	}
-
-	conversation := &model.Conversation{
-		ID:        convResp.ID,
-		Name:      convResp.Title,
-		CreatedAt: convResp.CreatedAt,
-		UpdatedAt: convResp.UpdatedAt,
-		LastUsed:  time.Now(),
-	}
-
-	return conversation, nil
-}
-
-// buildSystemPrompt creates a system prompt for task execution
-func (c *Client) buildSystemPrompt(taskID string) string {
-	return fmt.Sprintf(`You are executing a scheduled AI task.
-Task ID: %s
-Please execute the following request and provide a complete response.
-This is an automated task execution from the mcp-cron scheduler.
-
-You have access to the full MCP tool surface through the OpenAPI Tools Server.
-You can:
-- Schedule new tasks using add_task or add_ai_task
-- Manage existing tasks with update_task, enable_task, disable_task
-- Query task status with get_task and list_tasks
-- Access all other available MCP tools
-
-Use your tools wisely to accomplish the task efficiently.`, taskID)
-}
-
-// buildContextualPrompt creates a contextual prompt for conversation continuity
-func (c *Client) buildContextualPrompt(taskID string, prompt string) string {
-	return fmt.Sprintf(`[Scheduled Task %s]
-%s`, taskID, prompt)
-}
-
 // Health checks if OpenWebUI is accessible
 func (c *Client) Health(ctx context.Context) error {
 	endpoint := c.baseURL + "/health"
 	req, err := http.NewRequestWithContext(ctx, "GET", endpoint, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create health check request: %w", err)
-	}
-
-	if c.apiKey != "" {
-		req.Header.Set("Authorization", "Bearer "+c.apiKey)
 	}
 
 	resp, err := c.httpClient.Do(req)
@@ -377,6 +211,5 @@ func (c *Client) GetModels(ctx context.Context) ([]string, error) {
 	for _, model := range modelsResp.Data {
 		models = append(models, model.ID)
 	}
-
 	return models, nil
 }
