@@ -3,6 +3,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -56,6 +57,32 @@ type AITaskParams struct {
 	Prompt string `json:"prompt,omitempty" description:"prompt to use for AI"`
 }
 
+// AgentParams holds parameters for agent creation
+type AgentParams struct {
+	Name        string `json:"name" description:"agent name"`
+	Schedule    string `json:"schedule" description:"cron schedule expression"`
+	Prompt      string `json:"prompt" description:"main task/goal for the agent"`
+	Personality string `json:"personality" description:"agent personality and role"`
+	Description string `json:"description,omitempty" description:"agent description"`
+	Context     string `json:"context,omitempty" description:"additional context"`
+	Enabled     bool   `json:"enabled,omitempty" description:"whether the agent is enabled"`
+}
+
+// SpawnAgentParams holds parameters for natural language agent spawning
+type SpawnAgentParams struct {
+	Description string `json:"description" description:"natural language description of the agent to create"`
+}
+
+// AgentSpecification represents a parsed agent specification
+type AgentSpecification struct {
+	Name        string `json:"name"`
+	Schedule    string `json:"schedule"`
+	Prompt      string `json:"prompt"`
+	Personality string `json:"personality"`
+	Description string `json:"description"`
+	Context     string `json:"context"`
+}
+
 // MCPServer represents the MCP scheduler server
 type MCPServer struct {
 	scheduler      *scheduler.Scheduler
@@ -107,14 +134,11 @@ func NewMCPServer(cfg *config.Config, scheduler *scheduler.Scheduler, cmdExecuto
 			logger.Errorf("Failed to get executable path: %v", err)
 			execPath = cfg.Server.Name
 		}
-
 		// Get the directory containing the executable
 		execDir := filepath.Dir(execPath)
-
 		// Set log path in the same directory as the executable
 		logFilename := fmt.Sprintf("%s.log", cfg.Server.Name)
 		logPath := filepath.Join(execDir, logFilename)
-
 		logFile, err := osOpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
 		if err == nil {
 			log.SetOutput(logFile)
@@ -211,6 +235,7 @@ func (s *MCPServer) Stop() error {
 		s.logger.Debugf("Stop called but server is already shutting down, ignoring")
 		return nil
 	}
+
 	s.isShuttingDown = true
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -235,7 +260,6 @@ func (s *MCPServer) Stop() error {
 // handleListTasks lists all tasks
 func (s *MCPServer) handleListTasks(_ *protocol.CallToolRequest) (*protocol.CallToolResult, error) {
 	s.logger.Debugf("Handling list_tasks request")
-
 	// Get all tasks
 	tasks := s.scheduler.ListTasks()
 	return createTasksResponse(tasks)
@@ -313,6 +337,120 @@ func (s *MCPServer) handleAddAITask(request *protocol.CallToolRequest) (*protoco
 	}
 
 	return createTaskResponse(task)
+}
+
+// handleCreateAgent creates a new autonomous agent
+func (s *MCPServer) handleCreateAgent(request *protocol.CallToolRequest) (*protocol.CallToolResult, error) {
+	// Extract parameters
+	var params AgentParams
+	if err := extractParams(request, &params); err != nil {
+		return createErrorResponse(err)
+	}
+
+	// Validate parameters
+	if err := validateAgentParams(params.Name, params.Schedule, params.Prompt, params.Personality); err != nil {
+		return createErrorResponse(err)
+	}
+
+	s.logger.Debugf("Handling create_agent request for agent %s", params.Name)
+
+	// Create task
+	task := createBaseTask(params.Name, params.Schedule, params.Description, params.Enabled)
+	task.Type = model.TypeAI.String()
+	task.Prompt = params.Prompt
+	task.IsAgent = true
+	task.AgentPersonality = params.Personality
+	task.ConversationContext = params.Context
+
+	// Agent tasks will get their conversation ID when first executed
+	if params.Name != "" {
+		task.ConversationName = fmt.Sprintf("Agent: %s", params.Name)
+	}
+
+	// Add task to scheduler
+	if err := s.scheduler.AddTask(task); err != nil {
+		return createErrorResponse(err)
+	}
+
+	return createTaskResponse(task)
+}
+
+// handleSpawnAgent spawns a new agent using natural language
+func (s *MCPServer) handleSpawnAgent(request *protocol.CallToolRequest) (*protocol.CallToolResult, error) {
+	var params SpawnAgentParams
+	if err := extractParams(request, &params); err != nil {
+		return createErrorResponse(err)
+	}
+
+	if params.Description == "" {
+		return createErrorResponse(errors.InvalidInput("description is required for spawning agents"))
+	}
+
+	s.logger.Debugf("Handling spawn_agent request: %s", params.Description)
+
+	// Use an LLM to parse the natural language description into agent parameters
+	agentSpec, err := s.parseAgentDescription(params.Description)
+	if err != nil {
+		return createErrorResponse(fmt.Errorf("failed to parse agent description: %w", err))
+	}
+
+	// Create the agent using the parsed specification
+	createParams := AgentParams{
+		Name:        agentSpec.Name,
+		Schedule:    agentSpec.Schedule,
+		Prompt:      agentSpec.Prompt,
+		Personality: agentSpec.Personality,
+		Description: agentSpec.Description,
+		Context:     agentSpec.Context,
+		Enabled:     true,
+	}
+
+	// Convert to protocol request
+	createJSON, _ := json.Marshal(createParams)
+	createRequest := &protocol.CallToolRequest{
+		RawArguments: createJSON,
+	}
+
+	return s.handleCreateAgent(createRequest)
+}
+
+// parseAgentDescription uses an LLM to parse natural language into agent parameters
+func (s *MCPServer) parseAgentDescription(description string) (*AgentSpecification, error) {
+	// For now, provide a simple fallback implementation
+	// In production, you would use the OpenWebUI client to parse this
+
+	// Basic parsing for common patterns
+	agentSpec := &AgentSpecification{
+		Name:        "Generated Agent",
+		Schedule:    "0 9 * * *", // Default to daily at 9 AM
+		Prompt:      description,
+		Personality: "You are a helpful AI assistant",
+		Description: description,
+		Context:     "",
+	}
+
+	// Try to extract schedule patterns
+	if strings.Contains(strings.ToLower(description), "daily") {
+		agentSpec.Schedule = "0 9 * * *"
+	} else if strings.Contains(strings.ToLower(description), "hourly") {
+		agentSpec.Schedule = "0 * * * *"
+	} else if strings.Contains(strings.ToLower(description), "weekly") {
+		agentSpec.Schedule = "0 9 * * 1"
+	}
+
+	// Extract name if possible
+	if strings.Contains(strings.ToLower(description), "news") {
+		agentSpec.Name = "News Agent"
+		agentSpec.Personality = "You are a knowledgeable news analyst who provides concise, objective summaries"
+	} else if strings.Contains(strings.ToLower(description), "health") {
+		agentSpec.Name = "Health Agent"
+		agentSpec.Personality = "You are a caring health advisor who provides gentle, informed guidance"
+	} else if strings.Contains(strings.ToLower(description), "weather") {
+		agentSpec.Name = "Weather Agent"
+		agentSpec.Personality = "You are a friendly weather forecaster who provides clear, actionable weather information"
+	}
+
+	return agentSpec, nil
 }
 
 // createBaseTask creates a base task with common fields initialized
@@ -498,9 +636,16 @@ func (s *MCPServer) GetTaskResult(taskID string) (*model.Result, bool) {
 	if result, exists := s.agentExecutor.GetTaskResult(taskID); exists {
 		return result, true
 	}
-
 	// If not found in agent executor, try the command executor
 	return s.cmdExecutor.GetTaskResult(taskID)
+}
+
+// validateAgentParams validates the parameters for agent creation
+func validateAgentParams(name, schedule, prompt, personality string) error {
+	if name == "" || schedule == "" || prompt == "" || personality == "" {
+		return errors.InvalidInput("missing required fields: name, schedule, prompt, and personality are required for agents")
+	}
+	return nil
 }
 
 // Helper function to parse log level

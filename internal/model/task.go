@@ -57,19 +57,41 @@ type Task struct {
 	Status      TaskStatus `json:"status"`
 	CreatedAt   time.Time  `json:"createdAt,omitempty"`
 	UpdatedAt   time.Time  `json:"updatedAt,omitempty"`
+
+	// Conversation and agent support
+	ConversationID      string     `json:"conversationId,omitempty" description:"OpenWebUI conversation ID for persistent context"`
+	ConversationName    string     `json:"conversationName,omitempty" description:"Human-readable name for the conversation"`
+	ConversationContext string     `json:"conversationContext,omitempty" description:"Additional context for the conversation"`
+	IsAgent             bool       `json:"isAgent,omitempty" description:"Whether this task represents an autonomous agent"`
+	AgentPersonality    string     `json:"agentPersonality,omitempty" description:"Personality/role description for the agent"`
+	MemorySummary       string     `json:"memorySummary,omitempty" description:"Summarized memory from previous executions"`
+	LastMemoryUpdate    *time.Time `json:"lastMemoryUpdate,omitempty" description:"When memory was last updated"`
 }
 
 // Result contains the results of a task execution
 type Result struct {
-	TaskID    string    `json:"task_id"`
-	Command   string    `json:"command,omitempty" description:"command for shell"`
-	Prompt    string    `json:"prompt,omitempty" description:"prompt to use for AI"`
-	Output    string    `json:"output"`
-	Error     string    `json:"error,omitempty"`
-	ExitCode  int       `json:"exit_code"`
-	StartTime time.Time `json:"start_time"`
-	EndTime   time.Time `json:"end_time"`
-	Duration  string    `json:"duration"`
+	TaskID         string    `json:"task_id"`
+	Command        string    `json:"command,omitempty" description:"command for shell"`
+	Prompt         string    `json:"prompt,omitempty" description:"prompt to use for AI"`
+	Output         string    `json:"output"`
+	Error          string    `json:"error,omitempty"`
+	ExitCode       int       `json:"exit_code"`
+	StartTime      time.Time `json:"start_time"`
+	EndTime        time.Time `json:"end_time"`
+	Duration       string    `json:"duration"`
+	ConversationID string    `json:"conversation_id,omitempty" description:"OpenWebUI conversation ID used"`
+}
+
+// Conversation represents an OpenWebUI conversation
+type Conversation struct {
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+	LastUsed    time.Time `json:"last_used"`
+	Context     string    `json:"context,omitempty"`
+	Type        string    `json:"type,omitempty"` // "task", "agent", "user_initiated"
+	Description string    `json:"description,omitempty"`
 }
 
 // Executor defines the interface for executing tasks

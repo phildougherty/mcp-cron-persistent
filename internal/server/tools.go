@@ -10,13 +10,10 @@ import (
 type ToolDefinition struct {
 	// Name is the name of the tool
 	Name string
-
 	// Description is a brief description of what the tool does
 	Description string
-
 	// Handler is the function that will be called when the tool is invoked
 	Handler func(*protocol.CallToolRequest) (*protocol.CallToolResult, error)
-
 	// Parameters is the parameter schema for the tool (can be a struct)
 	Parameters interface{}
 }
@@ -72,6 +69,18 @@ func (s *MCPServer) registerToolsDeclarative() {
 			Description: "Disables an enabled task",
 			Handler:     s.handleDisableTask,
 			Parameters:  TaskIDParams{},
+		},
+		{
+			Name:        "create_agent",
+			Description: "Create a new autonomous AI agent with persistent conversation and memory",
+			Handler:     s.handleCreateAgent,
+			Parameters:  AgentParams{},
+		},
+		{
+			Name:        "spawn_agent",
+			Description: "Spawn a new agent using natural language description",
+			Handler:     s.handleSpawnAgent,
+			Parameters:  SpawnAgentParams{},
 		},
 	}
 

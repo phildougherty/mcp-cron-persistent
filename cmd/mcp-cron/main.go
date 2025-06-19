@@ -166,7 +166,6 @@ func createApp(cfg *config.Config) (*Application, error) {
 		if err != nil {
 			return nil, err
 		}
-
 		// Set storage for the scheduler (this will load tasks from DB and schedule them)
 		if err := sched.SetStorage(sqliteStorage); err != nil {
 			sqliteStorage.Close()

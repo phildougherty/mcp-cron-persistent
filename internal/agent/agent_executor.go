@@ -40,7 +40,7 @@ func (ae *AgentExecutor) Execute(ctx context.Context, task *model.Task, timeout 
 	}
 
 	// Execute the command
-	result := ae.ExecuteAgentTask(ctx, task.ID, task.Prompt, timeout)
+	result := ae.ExecuteAgentTask(ctx, task.ID, task.Prompt, timeout, task)
 	if result.Error != "" {
 		return fmt.Errorf(result.Error)
 	}
@@ -54,6 +54,7 @@ func (ae *AgentExecutor) ExecuteAgentTask(
 	taskID string,
 	prompt string,
 	timeout time.Duration,
+	task *model.Task,
 ) *model.Result {
 	result := &model.Result{
 		Prompt:    prompt,
@@ -70,18 +71,15 @@ func (ae *AgentExecutor) ExecuteAgentTask(
 	execCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	// Create a task structure for RunTask
-	task := &model.Task{
-		ID:     taskID,
-		Prompt: prompt,
-	}
-
 	// Execute the task using RunTask
 	output, err := RunTask(execCtx, task, ae.config)
 
 	// Update result fields
 	result.EndTime = time.Now()
 	result.Duration = result.EndTime.Sub(result.StartTime).String()
+	if task != nil && task.ConversationID != "" {
+		result.ConversationID = task.ConversationID
+	}
 
 	if err != nil {
 		result.Error = err.Error()
@@ -112,7 +110,6 @@ func (ae *AgentExecutor) ExecuteAgentTask(
 func (ae *AgentExecutor) GetTaskResult(taskID string) (*model.Result, bool) {
 	ae.mu.Lock()
 	defer ae.mu.Unlock()
-
 	result, exists := ae.results[taskID]
 	return result, exists
 }

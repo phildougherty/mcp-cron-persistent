@@ -17,7 +17,7 @@ import (
 )
 
 // createTestServer creates a minimal MCPServer for testing
-func createAITestServer(t *testing.T) *MCPServer {
+func createAITestServer(_ *testing.T) *MCPServer {
 	// Create a config for testing
 	cfg := config.DefaultConfig()
 
