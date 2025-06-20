@@ -82,7 +82,7 @@ func DefaultConfig() *Config {
 		Server: ServerConfig{
 			Address:       "localhost",
 			Port:          8080,
-			TransportMode: "sse",
+			TransportMode: "sse", // Already set correctly
 			Name:          "mcp-cron",
 			Version:       "0.1.0",
 		},
