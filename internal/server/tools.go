@@ -89,6 +89,12 @@ func (s *MCPServer) registerToolsDeclarative() {
 			Parameters:  RunStatusParams{},
 		},
 		{
+			Name:        "run_task",
+			Description: "Triggers any configured scheduled task to run immediately on demand",
+			Handler:     s.handleRunTask,
+			Parameters:  RunTaskParams{},
+		},
+		{
 			Name:        "get_run_output",
 			Description: "Gets detailed output from a specific task run",
 			Handler:     s.handleGetRunOutput,

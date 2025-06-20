@@ -83,6 +83,12 @@ type AgentSpecification struct {
 	Context     string `json:"context"`
 }
 
+// RunTaskParams holds parameters for running a task on demand
+type RunTaskParams struct {
+	ID      string `json:"id" description:"the ID of the task to run"`
+	Timeout string `json:"timeout,omitempty" description:"optional timeout duration (e.g., '5m', '30s'). Uses task's default if not specified"`
+}
+
 // MCPServer represents the MCP scheduler server
 type MCPServer struct {
 	scheduler      *scheduler.Scheduler
@@ -223,6 +229,116 @@ func (s *MCPServer) Start(ctx context.Context) error {
 	}()
 
 	return nil
+}
+
+// handleRunTask triggers a task to run immediately
+func (s *MCPServer) handleRunTask(request *protocol.CallToolRequest) (*protocol.CallToolResult, error) {
+	// Extract parameters
+	var params RunTaskParams
+	if err := extractParams(request, &params); err != nil {
+		return createErrorResponse(err)
+	}
+
+	if params.ID == "" {
+		return createErrorResponse(errors.InvalidInput("task ID is required"))
+	}
+
+	s.logger.Debugf("Handling run_task request for task %s", params.ID)
+
+	// Get the task
+	task, err := s.scheduler.GetTask(params.ID)
+	if err != nil {
+		return createErrorResponse(err)
+	}
+
+	// Parse timeout if provided
+	timeout := s.config.Scheduler.DefaultTimeout
+	if params.Timeout != "" {
+		if parsedTimeout, err := time.ParseDuration(params.Timeout); err != nil {
+			return createErrorResponse(errors.InvalidInput(fmt.Sprintf("invalid timeout format: %s", err.Error())))
+		} else {
+			timeout = parsedTimeout
+		}
+	}
+
+	// Create context for execution
+	ctx := context.Background()
+
+	// Update task status to running
+	task.Status = model.StatusRunning
+	task.LastRun = time.Now()
+	task.UpdatedAt = time.Now()
+
+	// Execute the task using the server's Execute method (which routes to appropriate executor)
+	s.logger.Infof("Executing task %s (%s) on demand", task.ID, task.Name)
+	startTime := time.Now()
+	err = s.Execute(ctx, task, timeout)
+	endTime := time.Now()
+	duration := endTime.Sub(startTime)
+
+	// Update task status based on execution outcome
+	if err != nil {
+		task.Status = model.StatusFailed
+		s.logger.Errorf("Task %s failed: %v", task.ID, err)
+	} else {
+		task.Status = model.StatusCompleted
+		s.logger.Infof("Task %s completed successfully", task.ID)
+	}
+
+	// Update the task in scheduler (this will save to storage if available)
+	if updateErr := s.scheduler.UpdateTask(task); updateErr != nil {
+		s.logger.Errorf("Failed to update task %s after execution: %v", task.ID, updateErr)
+	}
+
+	// Create response with execution details
+	response := map[string]interface{}{
+		"success":    err == nil,
+		"task_id":    task.ID,
+		"task_name":  task.Name,
+		"status":     string(task.Status),
+		"start_time": startTime.Format(time.RFC3339),
+		"end_time":   endTime.Format(time.RFC3339),
+		"duration":   duration.String(),
+		"exit_code":  0, // Will be updated below if we have executor result
+	}
+
+	if err != nil {
+		response["error"] = err.Error()
+		response["exit_code"] = 1
+	} else {
+		response["message"] = fmt.Sprintf("Task %s executed successfully", task.ID)
+	}
+
+	// Get the actual result from the appropriate executor for more detailed output
+	if executorResult, exists := s.GetTaskResult(task.ID); exists {
+		response["output"] = executorResult.Output
+		response["exit_code"] = executorResult.ExitCode
+
+		// Add command or prompt info based on task type
+		if executorResult.Command != "" {
+			response["command"] = executorResult.Command
+		}
+		if executorResult.Prompt != "" {
+			response["prompt"] = executorResult.Prompt
+		}
+		if executorResult.ConversationID != "" {
+			response["conversation_id"] = executorResult.ConversationID
+		}
+	}
+
+	responseJSON, marshalErr := json.Marshal(response)
+	if marshalErr != nil {
+		return nil, errors.Internal(fmt.Errorf("failed to marshal response: %w", marshalErr))
+	}
+
+	return &protocol.CallToolResult{
+		Content: []protocol.Content{
+			protocol.TextContent{
+				Type: "text",
+				Text: string(responseJSON),
+			},
+		},
+	}, nil
 }
 
 // Stop stops the MCP server
