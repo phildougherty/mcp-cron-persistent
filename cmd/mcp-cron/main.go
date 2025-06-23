@@ -4,6 +4,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -42,6 +43,15 @@ func main() {
 
 	// Load configuration
 	cfg := loadConfig()
+
+	// DEBUG: Print configuration (remove this after debugging)
+	fmt.Printf("=== DEBUG CONFIG ===\n")
+	fmt.Printf("UseOpenRouter: %v\n", cfg.UseOpenRouter)
+	fmt.Printf("OpenRouter.Enabled: %v\n", cfg.OpenRouter.Enabled)
+	fmt.Printf("OpenRouter.APIKey set: %v\n", cfg.OpenRouter.APIKey != "")
+	fmt.Printf("OpenRouter.MCPProxyURL: %s\n", cfg.OpenRouter.MCPProxyURL)
+	fmt.Printf("OpenWebUI.Enabled: %v\n", cfg.OpenWebUI.Enabled)
+	fmt.Printf("===================\n")
 
 	// Show version and exit if requested
 	if *version {

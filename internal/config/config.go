@@ -21,7 +21,9 @@ type Config struct {
 	// OpenWebUI integration configuration
 	OpenWebUI OpenWebUIConfig
 	// Database configuration
-	Database DatabaseConfig
+	Database      DatabaseConfig
+	OpenRouter    OpenRouterConfig
+	UseOpenRouter bool
 }
 
 // ServerConfig holds server-specific configuration
@@ -76,6 +78,15 @@ type DatabaseConfig struct {
 	Enabled bool
 }
 
+// OpenRouterConfig holds OpenRouter integration configuration
+type OpenRouterConfig struct {
+	APIKey      string
+	Model       string
+	MCPProxyURL string
+	MCPProxyKey string
+	Enabled     bool
+}
+
 // DefaultConfig returns the default configuration
 func DefaultConfig() *Config {
 	return &Config{
@@ -105,6 +116,14 @@ func DefaultConfig() *Config {
 			Path:    filepath.Join(os.Getenv("HOME"), ".mcp-cron", "mcp-cron.db"),
 			Enabled: true,
 		},
+		OpenRouter: OpenRouterConfig{
+			APIKey:      "",
+			Model:       "anthropic/claude-3.5-sonnet",
+			MCPProxyURL: "http://192.168.86.201:9876",
+			MCPProxyKey: "myapikey",
+			Enabled:     false,
+		},
+		UseOpenRouter: false,
 	}
 }
 
@@ -131,8 +150,23 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("log level must be one of: debug, info, warn, error, fatal")
 	}
 
-	// Validate OpenWebUI config if enabled
-	if c.OpenWebUI.Enabled {
+	// Auto-logic: if USE_OPENROUTER is true or OpenRouter is enabled, disable OpenWebUI
+	if c.UseOpenRouter || c.OpenRouter.Enabled {
+		c.OpenWebUI.Enabled = false
+	}
+
+	// Validate OpenRouter config if enabled
+	if c.UseOpenRouter || c.OpenRouter.Enabled {
+		if c.OpenRouter.APIKey == "" {
+			return fmt.Errorf("OpenRouter API key is required when OpenRouter integration is enabled")
+		}
+		if c.OpenRouter.MCPProxyURL == "" {
+			return fmt.Errorf("MCP proxy URL is required when OpenRouter integration is enabled")
+		}
+	}
+
+	// Validate OpenWebUI config if enabled and OpenRouter is not being used
+	if c.OpenWebUI.Enabled && !c.UseOpenRouter && !c.OpenRouter.Enabled {
 		if c.OpenWebUI.BaseURL == "" {
 			return fmt.Errorf("OpenWebUI base URL is required when OpenWebUI integration is enabled")
 		}
@@ -217,5 +251,32 @@ func FromEnv(config *Config) {
 	}
 	if val := os.Getenv("MCP_CRON_DATABASE_ENABLED"); val != "" {
 		config.Database.Enabled = strings.ToLower(val) == "true"
+	}
+
+	// OpenRouter configuration
+	if val := os.Getenv("OPENROUTER_API_KEY"); val != "" {
+		config.OpenRouter.APIKey = val
+	}
+	if val := os.Getenv("OPENROUTER_MODEL"); val != "" {
+		config.OpenRouter.Model = val
+	}
+	if val := os.Getenv("MCP_PROXY_URL"); val != "" {
+		config.OpenRouter.MCPProxyURL = val
+	}
+	if val := os.Getenv("MCP_PROXY_API_KEY"); val != "" {
+		config.OpenRouter.MCPProxyKey = val
+	}
+	if val := os.Getenv("OPENROUTER_ENABLED"); val != "" {
+		config.OpenRouter.Enabled = strings.ToLower(val) == "true"
+	}
+	if val := os.Getenv("USE_OPENROUTER"); val != "" {
+		config.UseOpenRouter = strings.ToLower(val) == "true"
+	}
+
+	// Auto-logic: if USE_OPENROUTER is true or OpenRouter is enabled, disable OpenWebUI
+	if config.UseOpenRouter || config.OpenRouter.Enabled {
+		config.OpenWebUI.Enabled = false
+		fmt.Printf("INFO: OpenRouter enabled (UseOpenRouter=%v, OpenRouter.Enabled=%v), automatically disabling OpenWebUI\n",
+			config.UseOpenRouter, config.OpenRouter.Enabled)
 	}
 }
