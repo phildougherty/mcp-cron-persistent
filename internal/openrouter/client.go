@@ -25,18 +25,6 @@ type ChatRequest struct {
 	ToolChoice string    `json:"tool_choice,omitempty"`
 }
 
-type ChatResponse struct {
-	Choices []Choice `json:"choices"`
-	Error   *struct {
-		Message string `json:"message"`
-		Code    string `json:"code"`
-	} `json:"error,omitempty"`
-}
-
-type Choice struct {
-	Message Message `json:"message"`
-}
-
 type Message struct {
 	Role       string     `json:"role"`
 	Content    string     `json:"content,omitempty"`
@@ -64,11 +52,22 @@ type ToolCall struct {
 	} `json:"function"`
 }
 
+type ChatResponse struct {
+	Id      string `json:"id"`
+	Created int64  `json:"created"`
+	Model   string `json:"model"`
+	Choices []struct {
+		Index        int     `json:"index"`
+		FinishReason string  `json:"finish_reason"`
+		Message      Message `json:"message"`
+	} `json:"choices"`
+}
+
 func NewClient(apiKey string, logger *logging.Logger) *Client {
 	return &Client{
 		apiKey: apiKey,
 		httpClient: &http.Client{
-			Timeout: 60 * time.Second,
+			Timeout: 120 * time.Second, // Increased timeout for complex operations
 		},
 		logger: logger,
 	}
@@ -93,15 +92,13 @@ func (c *Client) ExecuteAITaskWithTools(ctx context.Context, prompt, model strin
 			req.ToolChoice = "auto"
 		}
 
+		c.logger.Debugf("Sending request to OpenRouter API")
 		resp, err := c.sendRequest(ctx, req)
 		if err != nil {
 			return "", err
 		}
 
-		// Check for API errors
-		if resp.Error != nil {
-			return "", fmt.Errorf("OpenRouter API error: %s", resp.Error.Message)
-		}
+		c.logger.Debugf("Received response from OpenRouter API")
 
 		// Process response
 		if len(resp.Choices) == 0 {
@@ -125,6 +122,7 @@ func (c *Client) ExecuteAITaskWithTools(ctx context.Context, prompt, model strin
 		// Execute tool calls
 		for _, toolCall := range message.ToolCalls {
 			c.logger.Debugf("Executing tool: %s", toolCall.Function.Name)
+
 			result, err := toolProxy.ExecuteTool(ctx, toolCall.Function.Name, toolCall.Function.Arguments)
 			if err != nil {
 				c.logger.Errorf("Tool execution failed for %s: %v", toolCall.Function.Name, err)
@@ -158,28 +156,23 @@ func (c *Client) sendRequest(ctx context.Context, req ChatRequest) (*ChatRespons
 
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
-	httpReq.Header.Set("HTTP-Referer", "https://github.com/jolks/mcp-cron")
-	httpReq.Header.Set("X-Title", "MCP Cron Persistent")
+	httpReq.Header.Set("HTTP-Referer", "https://github.com/phildougherty/mcp-cron-persistent")
+	httpReq.Header.Set("X-Title", "MCP Cron Scheduler")
 
-	c.logger.Debugf("Sending request to OpenRouter API")
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("failed to send request: %w", err)
+		return nil, fmt.Errorf("request failed: %w", err)
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("API returned status %d", resp.StatusCode)
+	}
 
 	var chatResponse ChatResponse
 	if err := json.NewDecoder(resp.Body).Decode(&chatResponse); err != nil {
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 
-	if resp.StatusCode != http.StatusOK {
-		if chatResponse.Error != nil {
-			return nil, fmt.Errorf("OpenRouter API error (status %d): %s", resp.StatusCode, chatResponse.Error.Message)
-		}
-		return nil, fmt.Errorf("OpenRouter API returned status %d", resp.StatusCode)
-	}
-
-	c.logger.Debugf("Received response from OpenRouter API")
 	return &chatResponse, nil
 }

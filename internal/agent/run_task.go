@@ -12,40 +12,15 @@ import (
 	"github.com/jolks/mcp-cron/internal/openwebui"
 )
 
-// RunTask executes an AI task using either OpenWebUI or OpenRouter based on configuration
+// RunTask executes an AI task using either OpenRouter or OpenWebUI
 func RunTask(ctx context.Context, t *model.Task, cfg *config.Config) (string, error) {
 	logger := logging.GetDefaultLogger().WithField("task_id", t.ID)
 
 	if cfg.UseOpenRouter || cfg.OpenRouter.Enabled {
 		return runTaskWithOpenRouter(ctx, t, cfg, logger)
-	} else if cfg.OpenWebUI.Enabled {
-		return runTaskWithOpenWebUI(ctx, t, cfg, logger)
 	} else {
-		return "", fmt.Errorf("no AI provider enabled (neither OpenWebUI nor OpenRouter)")
+		return runTaskWithOpenWebUI(ctx, t, cfg, logger)
 	}
-}
-
-func runTaskWithOpenWebUI(ctx context.Context, t *model.Task, cfg *config.Config, logger *logging.Logger) (string, error) {
-	logger.Infof("Running AI task: %s via OpenWebUI", t.Name)
-
-	// Create OpenWebUI client
-	client := openwebui.NewClient(&cfg.OpenWebUI, logger)
-
-	// Execute the AI task via OpenWebUI
-	result, err := client.ExecuteAITask(
-		ctx,
-		t.ID,
-		t.Prompt,
-		cfg.OpenWebUI.Model,
-		cfg.OpenWebUI.UserID,
-	)
-	if err != nil {
-		logger.Errorf("Failed to execute AI task via OpenWebUI: %v", err)
-		return "", err
-	}
-
-	logger.Infof("AI task completed successfully via OpenWebUI")
-	return result, nil
 }
 
 func runTaskWithOpenRouter(ctx context.Context, t *model.Task, cfg *config.Config, logger *logging.Logger) (string, error) {
@@ -55,7 +30,7 @@ func runTaskWithOpenRouter(ctx context.Context, t *model.Task, cfg *config.Confi
 	client := openrouter.NewClient(cfg.OpenRouter.APIKey, logger)
 
 	// Create tool proxy
-	toolProxy := openrouter.NewToolProxy(cfg.OpenRouter.MCPProxyURL, cfg.OpenRouter.MCPProxyKey)
+	toolProxy := openrouter.NewToolProxy(cfg.OpenRouter.MCPProxyURL, cfg.OpenRouter.MCPProxyKey, logger)
 
 	// Load available tools
 	if err := toolProxy.LoadTools(ctx); err != nil {
@@ -74,5 +49,32 @@ func runTaskWithOpenRouter(ctx context.Context, t *model.Task, cfg *config.Confi
 	}
 
 	logger.Infof("AI task completed successfully via OpenRouter")
+	return result, nil
+}
+
+func runTaskWithOpenWebUI(ctx context.Context, t *model.Task, cfg *config.Config, logger *logging.Logger) (string, error) {
+	logger.Infof("Running AI task: %s via OpenWebUI", t.Name)
+
+	if !cfg.OpenWebUI.Enabled {
+		return "", fmt.Errorf("OpenWebUI integration is disabled")
+	}
+
+	// Create OpenWebUI client
+	client := openwebui.NewClient(&cfg.OpenWebUI, logger)
+
+	// Execute the AI task via OpenWebUI
+	result, err := client.ExecuteAITask(
+		ctx,
+		t.ID,
+		t.Prompt,
+		cfg.OpenWebUI.Model,
+		cfg.OpenWebUI.UserID,
+	)
+	if err != nil {
+		logger.Errorf("Failed to execute AI task via OpenWebUI: %v", err)
+		return "", err
+	}
+
+	logger.Infof("AI task completed successfully via OpenWebUI")
 	return result, nil
 }
