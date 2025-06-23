@@ -107,9 +107,9 @@ func DefaultConfig() *Config {
 		OpenWebUI: OpenWebUIConfig{
 			BaseURL:        "http://localhost:3000",
 			APIKey:         "",
-			Model:          "", // Will use OpenWebUI's default
+			Model:          "",
 			UserID:         "scheduler",
-			RequestTimeout: 60, // 60 seconds for AI tasks
+			RequestTimeout: 60,
 			Enabled:        true,
 		},
 		Database: DatabaseConfig{
@@ -117,10 +117,10 @@ func DefaultConfig() *Config {
 			Enabled: true,
 		},
 		OpenRouter: OpenRouterConfig{
-			APIKey:      "",
+			APIKey:      "", // Must be set via environment
 			Model:       "anthropic/claude-3.5-sonnet",
-			MCPProxyURL: "http://192.168.86.201:9876",
-			MCPProxyKey: "myapikey",
+			MCPProxyURL: "http://localhost:9876", // Default, override via env
+			MCPProxyKey: "",                      // Must be set via environment
 			Enabled:     false,
 		},
 		UseOpenRouter: false,
@@ -158,10 +158,13 @@ func (c *Config) Validate() error {
 	// Validate OpenRouter config if enabled
 	if c.UseOpenRouter || c.OpenRouter.Enabled {
 		if c.OpenRouter.APIKey == "" {
-			return fmt.Errorf("OpenRouter API key is required when OpenRouter integration is enabled")
+			return fmt.Errorf("OpenRouter API key is required when OpenRouter integration is enabled (set OPENROUTER_API_KEY environment variable)")
 		}
 		if c.OpenRouter.MCPProxyURL == "" {
-			return fmt.Errorf("MCP proxy URL is required when OpenRouter integration is enabled")
+			return fmt.Errorf("MCP proxy URL is required when OpenRouter integration is enabled (set MCP_PROXY_URL environment variable)")
+		}
+		if c.OpenRouter.MCPProxyKey == "" {
+			return fmt.Errorf("MCP proxy API key is required when OpenRouter integration is enabled (set MCP_PROXY_API_KEY environment variable)")
 		}
 	}
 
