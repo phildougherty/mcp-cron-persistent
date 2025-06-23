@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: AGPL-3.0-only
 package openrouter
 
 import (
@@ -61,26 +60,43 @@ type ChatResponse struct {
 		FinishReason string  `json:"finish_reason"`
 		Message      Message `json:"message"`
 	} `json:"choices"`
+	Usage struct {
+		PromptTokens     int `json:"prompt_tokens"`
+		CompletionTokens int `json:"completion_tokens"`
+		TotalTokens      int `json:"total_tokens"`
+	} `json:"usage"`
+	Error *struct {
+		Message string `json:"message"`
+		Type    string `json:"type"`
+		Code    string `json:"code"`
+	} `json:"error,omitempty"`
 }
 
 func NewClient(apiKey string, logger *logging.Logger) *Client {
 	return &Client{
 		apiKey: apiKey,
 		httpClient: &http.Client{
-			Timeout: 120 * time.Second, // Increased timeout for complex operations
+			Timeout: 120 * time.Second, // Longer timeout for complex operations
 		},
 		logger: logger,
 	}
 }
 
 func (c *Client) ExecuteAITaskWithTools(ctx context.Context, prompt, model string, tools []Tool, toolProxy *ToolProxy) (string, error) {
+	taskId := ctx.Value("task_id")
+	if taskId == nil {
+		taskId = "unknown"
+	}
+
+	c.logger.Infof("[task_id=%v] Starting OpenRouter execution with %d tools available", taskId, len(tools))
+
 	messages := []Message{
 		{Role: "user", Content: prompt},
 	}
 
 	maxIterations := 10
 	for i := 0; i < maxIterations; i++ {
-		c.logger.Debugf("OpenRouter iteration %d/%d", i+1, maxIterations)
+		c.logger.Debugf("[task_id=%v] OpenRouter iteration %d/%d", taskId, i+1, maxIterations)
 
 		req := ChatRequest{
 			Model:    model,
@@ -92,13 +108,14 @@ func (c *Client) ExecuteAITaskWithTools(ctx context.Context, prompt, model strin
 			req.ToolChoice = "auto"
 		}
 
-		c.logger.Debugf("Sending request to OpenRouter API")
+		c.logger.Debugf("[task_id=%v] Sending request to OpenRouter API", taskId)
 		resp, err := c.sendRequest(ctx, req)
 		if err != nil {
+			c.logger.Errorf("[task_id=%v] OpenRouter API request failed: %v", taskId, err)
 			return "", err
 		}
 
-		c.logger.Debugf("Received response from OpenRouter API")
+		c.logger.Debugf("[task_id=%v] Received response from OpenRouter API", taskId)
 
 		// Process response
 		if len(resp.Choices) == 0 {
@@ -113,22 +130,47 @@ func (c *Client) ExecuteAITaskWithTools(ctx context.Context, prompt, model strin
 
 		// If no tool calls, we're done
 		if len(message.ToolCalls) == 0 {
-			c.logger.Infof("OpenRouter task completed after %d iterations", i+1)
+			c.logger.Infof("[task_id=%v] OpenRouter task completed after %d iterations", taskId, i+1)
 			return message.Content, nil
 		}
 
-		c.logger.Infof("OpenRouter requesting %d tool calls", len(message.ToolCalls))
+		c.logger.Infof("[task_id=%v] OpenRouter requesting %d tool calls", taskId, len(message.ToolCalls))
 
 		// Execute tool calls
 		for _, toolCall := range message.ToolCalls {
-			c.logger.Debugf("Executing tool: %s", toolCall.Function.Name)
+			c.logger.Debugf("[task_id=%v] Executing tool: %s", taskId, toolCall.Function.Name)
 
-			result, err := toolProxy.ExecuteTool(ctx, toolCall.Function.Name, toolCall.Function.Arguments)
+			var args map[string]interface{}
+
+			// Handle both string and object arguments from OpenRouter
+			if len(toolCall.Function.Arguments) > 0 {
+				// Try to parse as JSON object first
+				if err := json.Unmarshal(toolCall.Function.Arguments, &args); err != nil {
+					// If that fails, try to parse as a JSON string containing JSON
+					var argsString string
+					if err2 := json.Unmarshal(toolCall.Function.Arguments, &argsString); err2 == nil {
+						// Now parse the string as JSON
+						if err3 := json.Unmarshal([]byte(argsString), &args); err3 != nil {
+							c.logger.Errorf("[task_id=%v] Failed to parse tool arguments: %v. Raw: %s", taskId, err3, string(toolCall.Function.Arguments))
+							args = map[string]interface{}{
+								"error": fmt.Sprintf("Failed to parse arguments: %v", err3),
+							}
+						}
+					} else {
+						c.logger.Errorf("[task_id=%v] Failed to parse tool arguments as string or object: %v. Raw: %s", taskId, err, string(toolCall.Function.Arguments))
+						args = map[string]interface{}{
+							"error": fmt.Sprintf("Failed to parse arguments: %v", err),
+						}
+					}
+				}
+			}
+
+			result, err := toolProxy.ExecuteTool(ctx, toolCall.Function.Name, args)
 			if err != nil {
-				c.logger.Errorf("Tool execution failed for %s: %v", toolCall.Function.Name, err)
 				result = fmt.Sprintf("Error executing tool %s: %v", toolCall.Function.Name, err)
+				c.logger.Errorf("[task_id=%v] Tool execution failed for %s: %v", taskId, toolCall.Function.Name, err)
 			} else {
-				c.logger.Debugf("Tool %s executed successfully", toolCall.Function.Name)
+				c.logger.Debugf("[task_id=%v] Tool %s executed successfully", taskId, toolCall.Function.Name)
 			}
 
 			// Add tool result to conversation
@@ -140,39 +182,44 @@ func (c *Client) ExecuteAITaskWithTools(ctx context.Context, prompt, model strin
 		}
 	}
 
+	c.logger.Warnf("[task_id=%v] OpenRouter reached max iterations (%d) without completion", taskId, maxIterations)
 	return "", fmt.Errorf("max iterations (%d) reached without completion", maxIterations)
 }
 
 func (c *Client) sendRequest(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
-	requestBody, err := json.Marshal(req)
+	reqBody, err := json.Marshal(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", "https://openrouter.ai/api/v1/chat/completions", bytes.NewBuffer(requestBody))
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", "https://openrouter.ai/api/v1/chat/completions", bytes.NewBuffer(reqBody))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
-	httpReq.Header.Set("HTTP-Referer", "https://github.com/phildougherty/mcp-cron-persistent")
-	httpReq.Header.Set("X-Title", "MCP Cron Scheduler")
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("HTTP-Referer", "https://github.com/phildougherty/mcp-cron-persistent") // Required by OpenRouter
+	httpReq.Header.Set("X-Title", "MCP-Cron Scheduler")                                        // Optional but recommended
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
+		return nil, fmt.Errorf("HTTP request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("API returned status %d", resp.StatusCode)
-	}
-
-	var chatResponse ChatResponse
-	if err := json.NewDecoder(resp.Body).Decode(&chatResponse); err != nil {
+	var chatResp ChatResponse
+	if err := json.NewDecoder(resp.Body).Decode(&chatResp); err != nil {
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 
-	return &chatResponse, nil
+	if chatResp.Error != nil {
+		return nil, fmt.Errorf("OpenRouter API error: %s (type: %s, code: %s)", chatResp.Error.Message, chatResp.Error.Type, chatResp.Error.Code)
+	}
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("OpenRouter API returned status %d", resp.StatusCode)
+	}
+
+	return &chatResp, nil
 }
