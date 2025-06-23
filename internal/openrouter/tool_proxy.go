@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: AGPL-3.0-only
 package openrouter
 
 import (
@@ -6,10 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
-	"time"
-
-	"github.com/jolks/mcp-cron/internal/logging"
 )
 
 type ToolProxy struct {
@@ -17,18 +14,13 @@ type ToolProxy struct {
 	apiKey     string
 	httpClient *http.Client
 	tools      []Tool
-	logger     *logging.Logger
 }
 
-func NewToolProxy(proxyURL, apiKey string, logger *logging.Logger) *ToolProxy {
+func NewToolProxy(proxyURL, apiKey string) *ToolProxy {
 	return &ToolProxy{
-		proxyURL: proxyURL,
-		apiKey:   apiKey,
-		httpClient: &http.Client{
-			Timeout: 60 * time.Second,
-		},
-		tools:  []Tool{},
-		logger: logger,
+		proxyURL:   proxyURL,
+		apiKey:     apiKey,
+		httpClient: &http.Client{},
 	}
 }
 
@@ -50,10 +42,6 @@ func (tp *ToolProxy) LoadTools(ctx context.Context) error {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to fetch OpenAPI spec: status %d", resp.StatusCode)
-	}
-
 	var openAPISpec map[string]interface{}
 	if err := json.NewDecoder(resp.Body).Decode(&openAPISpec); err != nil {
 		return err
@@ -61,8 +49,6 @@ func (tp *ToolProxy) LoadTools(ctx context.Context) error {
 
 	// Convert OpenAPI spec to OpenRouter tool format
 	tp.tools = tp.convertOpenAPIToTools(openAPISpec)
-	tp.logger.Debugf("Loaded %d tools from OpenAPI spec", len(tp.tools))
-
 	return nil
 }
 
@@ -70,14 +56,36 @@ func (tp *ToolProxy) GetTools() []Tool {
 	return tp.tools
 }
 
-func (tp *ToolProxy) ExecuteTool(ctx context.Context, toolName string, arguments json.RawMessage) (string, error) {
-	// Parse arguments
+func (tp *ToolProxy) ExecuteTool(ctx context.Context, toolName string, arguments interface{}) (string, error) {
 	var args map[string]interface{}
-	if err := json.Unmarshal(arguments, &args); err != nil {
-		return "", fmt.Errorf("failed to parse tool arguments: %w", err)
-	}
 
-	tp.logger.Debugf("Executing tool %s with args: %v", toolName, args)
+	// Handle different argument types
+	switch v := arguments.(type) {
+	case map[string]interface{}:
+		args = v
+	case string:
+		// Try to parse string as JSON
+		if err := json.Unmarshal([]byte(v), &args); err != nil {
+			return "", fmt.Errorf("failed to parse string arguments as JSON: %w", err)
+		}
+	case []byte:
+		// Try to parse bytes as JSON
+		if err := json.Unmarshal(v, &args); err != nil {
+			return "", fmt.Errorf("failed to parse byte arguments as JSON: %w", err)
+		}
+	case json.RawMessage:
+		// Handle json.RawMessage
+		if err := json.Unmarshal(v, &args); err != nil {
+			return "", fmt.Errorf("failed to parse RawMessage arguments as JSON: %w", err)
+		}
+	default:
+		// Try to marshal and unmarshal to normalize
+		if jsonBytes, err := json.Marshal(arguments); err != nil {
+			return "", fmt.Errorf("failed to marshal arguments: %w", err)
+		} else if err := json.Unmarshal(jsonBytes, &args); err != nil {
+			return "", fmt.Errorf("failed to unmarshal arguments: %w", err)
+		}
+	}
 
 	// Call the mcp-compose proxy tool endpoint
 	url := fmt.Sprintf("%s/%s", tp.proxyURL, toolName)
@@ -99,38 +107,22 @@ func (tp *ToolProxy) ExecuteTool(ctx context.Context, toolName string, arguments
 
 	resp, err := tp.httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("tool request failed: %w", err)
+		return "", err
 	}
 	defer resp.Body.Close()
 
-	// Read the raw response body
-	var responseBody bytes.Buffer
-	if _, err := responseBody.ReadFrom(resp.Body); err != nil {
-		return "", fmt.Errorf("failed to read response body: %w", err)
+	if resp.StatusCode != 200 {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("tool call failed with status %d: %s", resp.StatusCode, string(bodyBytes))
 	}
 
-	responseStr := responseBody.String()
-	tp.logger.Debugf("Tool %s raw response: %s", toolName, responseStr)
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("tool returned status %d: %s", resp.StatusCode, responseStr)
-	}
-
-	// Try to parse as JSON for pretty formatting, but if it fails, return the raw string
 	var result interface{}
-	if err := json.Unmarshal(responseBody.Bytes(), &result); err != nil {
-		// If not valid JSON, return as-is
-		tp.logger.Debugf("Tool %s returned non-JSON response, returning raw string", toolName)
-		return responseStr, nil
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", err
 	}
 
-	// Convert result to formatted JSON string
-	resultBytes, err := json.MarshalIndent(result, "", "  ")
-	if err != nil {
-		// Fallback to raw response if formatting fails
-		return responseStr, nil
-	}
-
+	// Convert result to string representation
+	resultBytes, _ := json.MarshalIndent(result, "", "  ")
 	return string(resultBytes), nil
 }
 
@@ -139,11 +131,10 @@ func (tp *ToolProxy) convertOpenAPIToTools(spec map[string]interface{}) []Tool {
 
 	paths, ok := spec["paths"].(map[string]interface{})
 	if !ok {
-		tp.logger.Warnf("No paths found in OpenAPI spec")
 		return tools
 	}
 
-	for path, pathSpec := range paths {
+	for _, pathSpec := range paths {
 		pathMap, ok := pathSpec.(map[string]interface{})
 		if !ok {
 			continue
@@ -155,46 +146,52 @@ func (tp *ToolProxy) convertOpenAPIToTools(spec map[string]interface{}) []Tool {
 				continue
 			}
 
-			operationId, ok := postMap["operationId"].(string)
-			if !ok {
-				tp.logger.Debugf("Skipping path %s: no operationId", path)
+			operationId, hasOpId := postMap["operationId"]
+			if !hasOpId {
 				continue
 			}
 
-			description, _ := postMap["description"].(string)
-			if description == "" {
-				description = fmt.Sprintf("Tool: %s", operationId)
+			toolName, ok := operationId.(string)
+			if !ok {
+				continue
+			}
+
+			description := ""
+			if desc, ok := postMap["description"].(string); ok {
+				description = desc
+			} else if summary, ok := postMap["summary"].(string); ok {
+				description = summary
+			} else {
+				description = fmt.Sprintf("Tool from MCP server: %s", toolName)
 			}
 
 			// Extract parameters from requestBody schema
-			parameters := tp.extractParametersFromRequestBody(postMap["requestBody"])
+			parameters := tp.extractParametersFromRequestBody(postMap)
 
-			tool := Tool{
+			tools = append(tools, Tool{
 				Type: "function",
 				Function: Function{
-					Name:        operationId,
+					Name:        toolName,
 					Description: description,
 					Parameters:  parameters,
 				},
-			}
-
-			tools = append(tools, tool)
-			tp.logger.Debugf("Added tool: %s", operationId)
+			})
 		}
 	}
 
 	return tools
 }
 
-func (tp *ToolProxy) extractParametersFromRequestBody(requestBody interface{}) map[string]interface{} {
-	// Default schema
+func (tp *ToolProxy) extractParametersFromRequestBody(postSpec map[string]interface{}) map[string]interface{} {
+	// Default empty schema
 	defaultSchema := map[string]interface{}{
 		"type":       "object",
 		"properties": map[string]interface{}{},
 		"required":   []string{},
 	}
 
-	if requestBody == nil {
+	requestBody, exists := postSpec["requestBody"]
+	if !exists {
 		return defaultSchema
 	}
 
@@ -203,20 +200,46 @@ func (tp *ToolProxy) extractParametersFromRequestBody(requestBody interface{}) m
 		return defaultSchema
 	}
 
-	content, ok := requestBodyMap["content"].(map[string]interface{})
+	content, exists := requestBodyMap["content"]
+	if !exists {
+		return defaultSchema
+	}
+
+	contentMap, ok := content.(map[string]interface{})
 	if !ok {
 		return defaultSchema
 	}
 
-	jsonContent, ok := content["application/json"].(map[string]interface{})
+	jsonContent, exists := contentMap["application/json"]
+	if !exists {
+		return defaultSchema
+	}
+
+	jsonContentMap, ok := jsonContent.(map[string]interface{})
 	if !ok {
 		return defaultSchema
 	}
 
-	schema, ok := jsonContent["schema"].(map[string]interface{})
+	schema, exists := jsonContentMap["schema"]
+	if !exists {
+		return defaultSchema
+	}
+
+	schemaMap, ok := schema.(map[string]interface{})
 	if !ok {
 		return defaultSchema
 	}
 
-	return schema
+	// Resolve $ref if present
+	if _, hasRef := schemaMap["$ref"]; hasRef {
+		// For now, return a generic schema for $ref
+		// In a full implementation, you'd resolve the reference
+		return map[string]interface{}{
+			"type":       "object",
+			"properties": map[string]interface{}{},
+			"required":   []string{},
+		}
+	}
+
+	return schemaMap
 }

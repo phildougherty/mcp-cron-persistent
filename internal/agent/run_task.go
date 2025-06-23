@@ -30,7 +30,7 @@ func runTaskWithOpenRouter(ctx context.Context, t *model.Task, cfg *config.Confi
 	client := openrouter.NewClient(cfg.OpenRouter.APIKey, logger)
 
 	// Create tool proxy
-	toolProxy := openrouter.NewToolProxy(cfg.OpenRouter.MCPProxyURL, cfg.OpenRouter.MCPProxyKey, logger)
+	toolProxy := openrouter.NewToolProxy(cfg.OpenRouter.MCPProxyURL, cfg.OpenRouter.MCPProxyKey)
 
 	// Load available tools
 	if err := toolProxy.LoadTools(ctx); err != nil {
