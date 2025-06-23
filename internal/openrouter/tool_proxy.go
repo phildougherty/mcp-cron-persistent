@@ -329,7 +329,7 @@ func (tp *ToolProxy) convertOpenAPIToTools(spec map[string]interface{}) []Tool {
 		return tools
 	}
 
-	for pathKey, pathSpec := range paths {
+	for _, pathSpec := range paths {
 		pathMap, ok := pathSpec.(map[string]interface{})
 		if !ok {
 			continue
