@@ -94,7 +94,7 @@ func (c *Client) ExecuteAITaskWithTools(ctx context.Context, prompt, model strin
 		{Role: "user", Content: prompt},
 	}
 
-	maxIterations := 10
+	maxIterations := 30
 	for i := 0; i < maxIterations; i++ {
 		c.logger.Debugf("[task_id=%v] OpenRouter iteration %d/%d", taskId, i+1, maxIterations)
 
