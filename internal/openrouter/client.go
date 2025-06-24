@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 
@@ -65,18 +66,34 @@ type ChatResponse struct {
 		CompletionTokens int `json:"completion_tokens"`
 		TotalTokens      int `json:"total_tokens"`
 	} `json:"usage"`
-	Error *struct {
-		Message string `json:"message"`
-		Type    string `json:"type"`
-		Code    string `json:"code"`
-	} `json:"error,omitempty"`
+	Error *OpenRouterError `json:"error,omitempty"`
+}
+
+// Custom error type to handle both string and number codes
+type OpenRouterError struct {
+	Message string      `json:"message"`
+	Type    string      `json:"type"`
+	Code    interface{} `json:"code"` // Can be string or number
+}
+
+func (e *OpenRouterError) GetCode() string {
+	switch v := e.Code.(type) {
+	case string:
+		return v
+	case float64:
+		return fmt.Sprintf("%.0f", v)
+	case int:
+		return fmt.Sprintf("%d", v)
+	default:
+		return fmt.Sprintf("%v", v)
+	}
 }
 
 func NewClient(apiKey string, logger *logging.Logger) *Client {
 	return &Client{
 		apiKey: apiKey,
 		httpClient: &http.Client{
-			Timeout: 120 * time.Second, // Longer timeout for complex operations
+			Timeout: 120 * time.Second,
 		},
 		logger: logger,
 	}
@@ -94,7 +111,7 @@ func (c *Client) ExecuteAITaskWithTools(ctx context.Context, prompt, model strin
 		{Role: "user", Content: prompt},
 	}
 
-	maxIterations := 30
+	maxIterations := 30 // Increased for complex tasks
 	for i := 0; i < maxIterations; i++ {
 		c.logger.Debugf("[task_id=%v] OpenRouter iteration %d/%d", taskId, i+1, maxIterations)
 
@@ -199,8 +216,8 @@ func (c *Client) sendRequest(ctx context.Context, req ChatRequest) (*ChatRespons
 
 	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("HTTP-Referer", "https://github.com/phildougherty/mcp-cron-persistent") // Required by OpenRouter
-	httpReq.Header.Set("X-Title", "MCP-Cron Scheduler")                                        // Optional but recommended
+	httpReq.Header.Set("HTTP-Referer", "https://github.com/phildougherty/mcp-cron-persistent")
+	httpReq.Header.Set("X-Title", "MCP-Cron Scheduler")
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
@@ -208,17 +225,35 @@ func (c *Client) sendRequest(ctx context.Context, req ChatRequest) (*ChatRespons
 	}
 	defer resp.Body.Close()
 
+	// Read the raw response body first
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	// Debug log the raw response if there's an error status
+	if resp.StatusCode >= 400 {
+		taskId := ctx.Value("task_id")
+		if taskId == nil {
+			taskId = "unknown"
+		}
+		c.logger.Errorf("[task_id=%v] OpenRouter API error (status %d): %s", taskId, resp.StatusCode, string(respBody))
+	}
+
 	var chatResp ChatResponse
-	if err := json.NewDecoder(resp.Body).Decode(&chatResp); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
+	if err := json.Unmarshal(respBody, &chatResp); err != nil {
+		return nil, fmt.Errorf("failed to decode response (status %d): %w. Body: %s", resp.StatusCode, err, string(respBody))
 	}
 
 	if chatResp.Error != nil {
-		return nil, fmt.Errorf("OpenRouter API error: %s (type: %s, code: %s)", chatResp.Error.Message, chatResp.Error.Type, chatResp.Error.Code)
+		return nil, fmt.Errorf("OpenRouter API error: %s (type: %s, code: %s)",
+			chatResp.Error.Message,
+			chatResp.Error.Type,
+			chatResp.Error.GetCode())
 	}
 
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("OpenRouter API returned status %d", resp.StatusCode)
+		return nil, fmt.Errorf("OpenRouter API returned status %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	return &chatResp, nil
