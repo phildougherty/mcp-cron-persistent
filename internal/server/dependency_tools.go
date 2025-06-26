@@ -3,6 +3,10 @@
 package server
 
 import (
+	"fmt"
+	"os"
+	"time"
+
 	"github.com/ThinkInAIXYZ/go-mcp/protocol"
 	"github.com/jolks/mcp-cron/internal/errors"
 	"github.com/jolks/mcp-cron/internal/model"
@@ -67,7 +71,6 @@ func (s *MCPServer) handleAddDependencyTask(request *protocol.CallToolRequest) (
 	return createTaskResponse(task)
 }
 
-// handleAddWatcherTask adds a watcher task
 func (s *MCPServer) handleAddWatcherTask(request *protocol.CallToolRequest) (*protocol.CallToolResult, error) {
 	var params WatcherTaskParams
 	if err := extractParams(request, &params); err != nil {
@@ -75,37 +78,52 @@ func (s *MCPServer) handleAddWatcherTask(request *protocol.CallToolRequest) (*pr
 	}
 
 	// Validate basic task parameters
-	if params.Type == model.TypeAI.String() {
-		if err := validateAITaskParams(params.Name, "", params.Prompt); err != nil { // No schedule for watchers
-			return createErrorResponse(err)
+	if params.AITaskParams.Name == "" {
+		return createErrorResponse(errors.InvalidInput("name is required"))
+	}
+
+	// Set default type if not specified
+	if params.AITaskParams.Type == "" {
+		if params.AITaskParams.Prompt != "" {
+			params.AITaskParams.Type = model.TypeAI.String()
+		} else if params.AITaskParams.Command != "" {
+			params.AITaskParams.Type = model.TypeShellCommand.String()
+		} else {
+			params.AITaskParams.Type = model.TypeAI.String() // Default to AI
+		}
+	}
+
+	// Validate based on type
+	if params.AITaskParams.Type == model.TypeAI.String() {
+		if params.AITaskParams.Prompt == "" {
+			return createErrorResponse(errors.InvalidInput("prompt is required for AI watcher tasks"))
 		}
 	} else {
-		if err := validateTaskParams(params.Name, ""); err != nil { // No schedule for watchers
-			return createErrorResponse(err)
-		}
-		if params.Command == "" {
+		if params.AITaskParams.Command == "" {
 			return createErrorResponse(errors.InvalidInput("command is required for shell watcher tasks"))
 		}
 	}
 
+	// Validate watcher config
 	if params.WatcherConfig == nil {
 		return createErrorResponse(errors.InvalidInput("watcherConfig is required for watcher tasks"))
 	}
 
-	// Validate watcher config
-	if err := validateWatcherConfig(params.WatcherConfig); err != nil {
+	// Enhanced watcher config validation with defaults
+	if err := validateAndSetWatcherDefaults(params.WatcherConfig); err != nil {
 		return createErrorResponse(err)
 	}
 
-	s.logger.Debugf("Handling add_watcher_task request for task %s", params.Name)
+	s.logger.Debugf("Handling add_watcher_task request for task %s", params.AITaskParams.Name)
 
-	// Create task
-	task := createBaseTask(params.Name, params.Schedule, params.Description, params.Enabled)
-	task.Type = params.Type
-	task.Command = params.Command
-	task.Prompt = params.Prompt
+	// Create task with proper defaults
+	task := createBaseTask(params.AITaskParams.Name, "", params.AITaskParams.Description, params.AITaskParams.Enabled)
+	task.Type = params.AITaskParams.Type
+	task.Command = params.AITaskParams.Command
+	task.Prompt = params.AITaskParams.Prompt
 	task.WatcherConfig = params.WatcherConfig
 	task.TriggerType = model.TriggerTypeWatcher
+	task.Schedule = "" // Watchers don't use cron schedules
 
 	// Add task to scheduler
 	if err := s.scheduler.AddTask(task); err != nil {
@@ -115,28 +133,47 @@ func (s *MCPServer) handleAddWatcherTask(request *protocol.CallToolRequest) (*pr
 	return createTaskResponse(task)
 }
 
-// validateWatcherConfig validates watcher configuration
-func validateWatcherConfig(config *model.WatcherConfig) error {
+func validateAndSetWatcherDefaults(config *model.WatcherConfig) error {
 	if config.Type == "" {
 		return errors.InvalidInput("watcher type is required")
 	}
+
+	// Set default check interval if not specified
+	if config.CheckInterval == "" {
+		config.CheckInterval = "30s"
+	}
+
+	// Validate check interval format
+	if _, err := time.ParseDuration(config.CheckInterval); err != nil {
+		return errors.InvalidInput(fmt.Sprintf("invalid checkInterval format: %s", config.CheckInterval))
+	}
+
+	// Set default TriggerOnce if not specified
+	// (Go zero value for bool is false, which is often what we want)
 
 	switch config.Type {
 	case model.WatcherTypeFileCreation, model.WatcherTypeFileChange:
 		if config.WatchPath == "" {
 			return errors.InvalidInput("watchPath is required for file watchers")
 		}
+		// Validate path exists (warning only)
+		if _, err := os.Stat(config.WatchPath); os.IsNotExist(err) {
+			// Log warning but don't fail - path might be created later
+			fmt.Printf("Warning: watchPath %s does not exist yet\n", config.WatchPath)
+		}
+
 	case model.WatcherTypeTaskCompletion:
 		if len(config.WatchTaskIDs) == 0 {
 			return errors.InvalidInput("watchTaskIDs is required for task completion watchers")
 		}
-	default:
-		return errors.InvalidInput("invalid watcher type: " + config.Type)
-	}
+		// Could validate that task IDs exist, but they might be created later
 
-	// Set default check interval if not specified
-	if config.CheckInterval == "" {
-		config.CheckInterval = "30s"
+	default:
+		return errors.InvalidInput(fmt.Sprintf("invalid watcher type: %s. Must be one of: %s, %s, %s",
+			config.Type,
+			model.WatcherTypeFileCreation,
+			model.WatcherTypeFileChange,
+			model.WatcherTypeTaskCompletion))
 	}
 
 	return nil
