@@ -18,9 +18,8 @@ type ToolDefinition struct {
 	Parameters interface{}
 }
 
-// registerToolsDeclarative sets up all the MCP tools using a more declarative approach
 func (s *MCPServer) registerToolsDeclarative() {
-	// Define all the tools in one place
+	// Define all the tools in one place - start with basic ones first
 	tools := []ToolDefinition{
 		{
 			Name:        "list_tasks",
@@ -71,28 +70,16 @@ func (s *MCPServer) registerToolsDeclarative() {
 			Parameters:  TaskIDParams{},
 		},
 		{
-			Name:        "create_agent",
-			Description: "Create a new autonomous AI agent with persistent conversation and memory",
-			Handler:     s.handleCreateAgent,
-			Parameters:  AgentParams{},
-		},
-		{
-			Name:        "spawn_agent",
-			Description: "Spawn a new agent using natural language description",
-			Handler:     s.handleSpawnAgent,
-			Parameters:  SpawnAgentParams{},
+			Name:        "run_task",
+			Description: "Triggers any configured scheduled task to run immediately on demand",
+			Handler:     s.handleRunTask,
+			Parameters:  RunTaskParams{},
 		},
 		{
 			Name:        "list_run_status",
 			Description: "Lists recent task execution status and summaries",
 			Handler:     s.handleListRunStatus,
 			Parameters:  RunStatusParams{},
-		},
-		{
-			Name:        "run_task",
-			Description: "Triggers any configured scheduled task to run immediately on demand",
-			Handler:     s.handleRunTask,
-			Parameters:  RunTaskParams{},
 		},
 		{
 			Name:        "get_run_output",
@@ -110,33 +97,47 @@ func (s *MCPServer) registerToolsDeclarative() {
 			Name:        "export_runs",
 			Description: "Exports run data in various formats (JSON, CSV, Markdown)",
 			Handler:     s.handleExportRuns,
-			Parameters:  ExportRunsParams{}, // Use the proper struct instead of inline struct
+			Parameters:  ExportRunsParams{},
 		},
-		// Add the new dependency and watcher tools
-		{
-			Name:        "add_dependency_task",
-			Description: "Adds a new task that depends on other tasks completing first",
-			Handler:     s.handleAddDependencyTask,
-			Parameters:  DependencyTaskParams{},
-		},
-		{
-			Name:        "add_watcher_task",
-			Description: "Adds a new watcher task that triggers on file changes or task completions",
-			Handler:     s.handleAddWatcherTask,
-			Parameters:  WatcherTaskParams{},
-		},
-		{
-			Name:        "add_manual_task",
-			Description: "Adds a new task that only runs when manually triggered",
-			Handler:     s.handleAddManualTask,
-			Parameters:  AITaskParams{},
-		},
-		{
-			Name:        "trigger_dependency_chain",
-			Description: "Manually triggers a dependency chain starting from a specific task",
-			Handler:     s.handleTriggerDependencyChain,
-			Parameters:  TaskIDParams{},
-		},
+		// Comment out the new tools temporarily to see if they're causing the issue
+		/*
+		   {
+		       Name:        "create_agent",
+		       Description: "Create a new autonomous AI agent with persistent conversation and memory",
+		       Handler:     s.handleCreateAgent,
+		       Parameters:  AgentParams{},
+		   },
+		   {
+		       Name:        "spawn_agent",
+		       Description: "Spawn a new agent using natural language description",
+		       Handler:     s.handleSpawnAgent,
+		       Parameters:  SpawnAgentParams{},
+		   },
+		   {
+		       Name:        "add_dependency_task",
+		       Description: "Adds a new task that depends on other tasks completing first",
+		       Handler:     s.handleAddDependencyTask,
+		       Parameters:  DependencyTaskParams{},
+		   },
+		   {
+		       Name:        "add_watcher_task",
+		       Description: "Adds a new watcher task that triggers on file changes or task completions",
+		       Handler:     s.handleAddWatcherTask,
+		       Parameters:  WatcherTaskParams{},
+		   },
+		   {
+		       Name:        "add_manual_task",
+		       Description: "Adds a new task that only runs when manually triggered",
+		       Handler:     s.handleAddManualTask,
+		       Parameters:  AITaskParams{},
+		   },
+		   {
+		       Name:        "trigger_dependency_chain",
+		       Description: "Manually triggers a dependency chain starting from a specific task",
+		       Handler:     s.handleTriggerDependencyChain,
+		       Parameters:  TaskIDParams{},
+		   },
+		*/
 	}
 
 	// Register all the tools
