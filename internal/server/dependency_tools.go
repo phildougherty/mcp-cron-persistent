@@ -14,17 +14,34 @@ import (
 
 // DependencyTaskParams holds parameters for dependency task creation
 type DependencyTaskParams struct {
-	AITaskParams
+	// Flatten the parameters instead of nesting AITaskParams
+	ID          string `json:"id,omitempty" description:"task ID"`
+	Name        string `json:"name,omitempty" description:"task name"`
+	Schedule    string `json:"schedule,omitempty" description:"cron schedule expression"`
+	Type        string `json:"type,omitempty" description:"task type"`
+	Command     string `json:"command,omitempty" description:"command to execute"`
+	Description string `json:"description,omitempty" description:"task description"`
+	Enabled     bool   `json:"enabled,omitempty" description:"whether the task is enabled"`
+	Prompt      string `json:"prompt,omitempty" description:"prompt to use for AI"`
+
 	DependsOn []string `json:"dependsOn" description:"task IDs this task depends on"`
 }
 
 // WatcherTaskParams holds parameters for watcher task creation
 type WatcherTaskParams struct {
-	AITaskParams
+	// Flatten the parameters instead of nesting AITaskParams
+	ID          string `json:"id,omitempty" description:"task ID"`
+	Name        string `json:"name,omitempty" description:"task name"`
+	Schedule    string `json:"schedule,omitempty" description:"cron schedule expression"`
+	Type        string `json:"type,omitempty" description:"task type"`
+	Command     string `json:"command,omitempty" description:"command to execute"`
+	Description string `json:"description,omitempty" description:"task description"`
+	Enabled     bool   `json:"enabled,omitempty" description:"whether the task is enabled"`
+	Prompt      string `json:"prompt,omitempty" description:"prompt to use for AI"`
+
 	WatcherConfig *model.WatcherConfig `json:"watcherConfig" description:"watcher configuration"`
 }
 
-// handleAddDependencyTask adds a task with dependencies
 func (s *MCPServer) handleAddDependencyTask(request *protocol.CallToolRequest) (*protocol.CallToolResult, error) {
 	var params DependencyTaskParams
 	if err := extractParams(request, &params); err != nil {
@@ -78,28 +95,28 @@ func (s *MCPServer) handleAddWatcherTask(request *protocol.CallToolRequest) (*pr
 	}
 
 	// Validate basic task parameters
-	if params.AITaskParams.Name == "" {
+	if params.Name == "" {
 		return createErrorResponse(errors.InvalidInput("name is required"))
 	}
 
 	// Set default type if not specified
-	if params.AITaskParams.Type == "" {
-		if params.AITaskParams.Prompt != "" {
-			params.AITaskParams.Type = model.TypeAI.String()
-		} else if params.AITaskParams.Command != "" {
-			params.AITaskParams.Type = model.TypeShellCommand.String()
+	if params.Type == "" {
+		if params.Prompt != "" {
+			params.Type = model.TypeAI.String()
+		} else if params.Command != "" {
+			params.Type = model.TypeShellCommand.String()
 		} else {
-			params.AITaskParams.Type = model.TypeAI.String() // Default to AI
+			params.Type = model.TypeAI.String() // Default to AI
 		}
 	}
 
 	// Validate based on type
-	if params.AITaskParams.Type == model.TypeAI.String() {
-		if params.AITaskParams.Prompt == "" {
+	if params.Type == model.TypeAI.String() {
+		if params.Prompt == "" {
 			return createErrorResponse(errors.InvalidInput("prompt is required for AI watcher tasks"))
 		}
 	} else {
-		if params.AITaskParams.Command == "" {
+		if params.Command == "" {
 			return createErrorResponse(errors.InvalidInput("command is required for shell watcher tasks"))
 		}
 	}
@@ -114,13 +131,13 @@ func (s *MCPServer) handleAddWatcherTask(request *protocol.CallToolRequest) (*pr
 		return createErrorResponse(err)
 	}
 
-	s.logger.Debugf("Handling add_watcher_task request for task %s", params.AITaskParams.Name)
+	s.logger.Debugf("Handling add_watcher_task request for task %s", params.Name)
 
 	// Create task with proper defaults
-	task := createBaseTask(params.AITaskParams.Name, "", params.AITaskParams.Description, params.AITaskParams.Enabled)
-	task.Type = params.AITaskParams.Type
-	task.Command = params.AITaskParams.Command
-	task.Prompt = params.AITaskParams.Prompt
+	task := createBaseTask(params.Name, "", params.Description, params.Enabled)
+	task.Type = params.Type
+	task.Command = params.Command
+	task.Prompt = params.Prompt
 	task.WatcherConfig = params.WatcherConfig
 	task.TriggerType = model.TriggerTypeWatcher
 	task.Schedule = "" // Watchers don't use cron schedules
