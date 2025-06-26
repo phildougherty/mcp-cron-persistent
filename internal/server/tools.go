@@ -116,6 +116,30 @@ func (s *MCPServer) registerToolsDeclarative() {
 				TaskID string `json:"task_id,omitempty" description:"filter by specific task ID"`
 			}{},
 		},
+		{
+			Name:        "add_dependency_task",
+			Description: "Adds a new task that depends on other tasks completing first",
+			Handler:     s.handleAddDependencyTask,
+			Parameters:  DependencyTaskParams{},
+		},
+		{
+			Name:        "add_watcher_task",
+			Description: "Adds a new watcher task that triggers on file changes or task completions",
+			Handler:     s.handleAddWatcherTask,
+			Parameters:  WatcherTaskParams{},
+		},
+		{
+			Name:        "add_manual_task",
+			Description: "Adds a new task that only runs when manually triggered",
+			Handler:     s.handleAddManualTask,
+			Parameters:  AITaskParams{},
+		},
+		{
+			Name:        "trigger_dependency_chain",
+			Description: "Manually triggers a dependency chain starting from a specific task",
+			Handler:     s.handleTriggerDependencyChain,
+			Parameters:  TaskIDParams{},
+		},
 	}
 
 	// Register all the tools

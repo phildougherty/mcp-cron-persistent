@@ -9,6 +9,7 @@ import (
 
 	"github.com/jolks/mcp-cron/internal/config"
 	"github.com/jolks/mcp-cron/internal/errors"
+	"github.com/jolks/mcp-cron/internal/logging"
 	"github.com/jolks/mcp-cron/internal/model"
 	"github.com/robfig/cron/v3"
 )
@@ -25,13 +26,15 @@ type Storage interface {
 
 // Scheduler manages cron tasks
 type Scheduler struct {
-	cron         *cron.Cron
-	tasks        map[string]*model.Task
-	entryIDs     map[string]cron.EntryID
-	mu           sync.RWMutex
-	taskExecutor model.Executor
-	config       *config.SchedulerConfig
-	storage      Storage
+	cron              *cron.Cron
+	tasks             map[string]*model.Task
+	entryIDs          map[string]cron.EntryID
+	mu                sync.RWMutex
+	taskExecutor      model.Executor
+	config            *config.SchedulerConfig
+	storage           Storage
+	dependencyManager *DependencyManager
+	watcherManager    *WatcherManager
 }
 
 // NewScheduler creates a new scheduler instance
@@ -50,6 +53,10 @@ func NewScheduler(cfg *config.SchedulerConfig) *Scheduler {
 		entryIDs: make(map[string]cron.EntryID),
 		config:   cfg,
 	}
+
+	// Initialize new managers
+	scheduler.dependencyManager = NewDependencyManager(scheduler)
+	scheduler.watcherManager = NewWatcherManager(scheduler, logging.GetDefaultLogger())
 
 	return scheduler
 }
@@ -115,46 +122,6 @@ func (s *Scheduler) Start(ctx context.Context) {
 	}()
 }
 
-// Stop halts the scheduler
-func (s *Scheduler) Stop() error {
-	s.cron.Stop()
-
-	// Close storage if available
-	if s.storage != nil {
-		return s.storage.Close()
-	}
-
-	return nil
-}
-
-// AddTask adds a new task to the scheduler
-func (s *Scheduler) AddTask(task *model.Task) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if _, exists := s.tasks[task.ID]; exists {
-		return errors.AlreadyExists("task", task.ID)
-	}
-
-	// Store the task in memory
-	s.tasks[task.ID] = task
-
-	// Save to persistent storage
-	s.saveTaskToStorage(task)
-
-	if task.Enabled {
-		err := s.scheduleTask(task)
-		if err != nil {
-			// If scheduling fails, set the task status to failed
-			task.Status = model.StatusFailed
-			s.saveTaskToStorage(task)
-			return err
-		}
-	}
-
-	return nil
-}
-
 // RemoveTask removes a task from the scheduler
 func (s *Scheduler) RemoveTask(taskID string) error {
 	s.mu.Lock()
@@ -181,63 +148,6 @@ func (s *Scheduler) RemoveTask(taskID string) error {
 	// Remove the task from our map
 	delete(s.tasks, taskID)
 
-	return nil
-}
-
-// EnableTask enables a disabled task
-func (s *Scheduler) EnableTask(taskID string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	task, exists := s.tasks[taskID]
-	if !exists {
-		return errors.NotFound("task", taskID)
-	}
-
-	if task.Enabled {
-		return nil // Already enabled
-	}
-
-	task.Enabled = true
-	task.UpdatedAt = time.Now()
-
-	err := s.scheduleTask(task)
-	if err != nil {
-		// If scheduling fails, set the task status to failed
-		task.Status = model.StatusFailed
-		s.saveTaskToStorage(task)
-		return err
-	}
-
-	s.saveTaskToStorage(task)
-	return nil
-}
-
-// DisableTask disables a running task
-func (s *Scheduler) DisableTask(taskID string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	task, exists := s.tasks[taskID]
-	if !exists {
-		return errors.NotFound("task", taskID)
-	}
-
-	if !task.Enabled {
-		return nil // Already disabled
-	}
-
-	// Remove from cron
-	if entryID, exists := s.entryIDs[taskID]; exists {
-		s.cron.Remove(entryID)
-		delete(s.entryIDs, taskID)
-	}
-
-	task.Enabled = false
-	task.Status = model.StatusDisabled
-	task.UpdatedAt = time.Now()
-
-	s.saveTaskToStorage(task)
 	return nil
 }
 
@@ -388,5 +298,211 @@ func (s *Scheduler) updateNextRunTime(task *model.Task) {
 				break
 			}
 		}
+	}
+}
+
+// TriggerTask manually triggers a task (for dependencies and watchers)
+func (s *Scheduler) triggerTask(task *model.Task) {
+	// Check if task is enabled
+	if !task.Enabled {
+		return
+	}
+
+	// For dependency tasks, check if dependencies are satisfied
+	if task.TriggerType == model.TriggerTypeDependency {
+		if satisfied, unsatisfied := s.dependencyManager.CheckDependencies(task); !satisfied {
+			// Add to pending executions
+			for _, depID := range unsatisfied {
+				s.dependencyManager.AddPendingExecution(depID, task.ID)
+			}
+			return
+		}
+	}
+
+	// Execute the task immediately
+	go s.executeTaskNow(task)
+}
+
+// AddTask adds a new task to the scheduler
+func (s *Scheduler) AddTask(task *model.Task) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, exists := s.tasks[task.ID]; exists {
+		return errors.AlreadyExists("task", task.ID)
+	}
+
+	// Set default trigger type if not specified
+	if task.TriggerType == "" {
+		if task.RunOnDemandOnly {
+			task.TriggerType = model.TriggerTypeManual
+		} else if len(task.DependsOn) > 0 {
+			task.TriggerType = model.TriggerTypeDependency
+		} else if task.WatcherConfig != nil {
+			task.TriggerType = model.TriggerTypeWatcher
+		} else {
+			task.TriggerType = model.TriggerTypeSchedule
+		}
+	}
+
+	// Store the task in memory
+	s.tasks[task.ID] = task
+
+	// Save to persistent storage
+	s.saveTaskToStorage(task)
+
+	if task.Enabled {
+		err := s.handleTaskScheduling(task)
+		if err != nil {
+			task.Status = model.StatusFailed
+			s.saveTaskToStorage(task)
+			return err
+		}
+	}
+
+	return nil
+}
+
+// EnableTask enables a disabled task
+func (s *Scheduler) EnableTask(taskID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	task, exists := s.tasks[taskID]
+	if !exists {
+		return errors.NotFound("task", taskID)
+	}
+
+	if task.Enabled {
+		return nil // Already enabled
+	}
+
+	task.Enabled = true
+	task.UpdatedAt = time.Now()
+
+	err := s.handleTaskScheduling(task)
+	if err != nil {
+		task.Status = model.StatusFailed
+		s.saveTaskToStorage(task)
+		return err
+	}
+
+	s.saveTaskToStorage(task)
+	return nil
+}
+
+// DisableTask disables a running task
+func (s *Scheduler) DisableTask(taskID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	task, exists := s.tasks[taskID]
+	if !exists {
+		return errors.NotFound("task", taskID)
+	}
+
+	if !task.Enabled {
+		return nil // Already disabled
+	}
+
+	// Remove from cron if scheduled
+	if entryID, exists := s.entryIDs[taskID]; exists {
+		s.cron.Remove(entryID)
+		delete(s.entryIDs, taskID)
+	}
+
+	// Stop watcher if it's a watcher task
+	if task.TriggerType == model.TriggerTypeWatcher {
+		s.watcherManager.StopWatcher(taskID)
+	}
+
+	task.Enabled = false
+	task.Status = model.StatusDisabled
+	task.UpdatedAt = time.Now()
+	s.saveTaskToStorage(task)
+	return nil
+}
+
+// Stop halts the scheduler
+func (s *Scheduler) Stop() error {
+	s.cron.Stop()
+	if s.watcherManager != nil {
+		s.watcherManager.Stop()
+	}
+
+	// Close storage if available
+	if s.storage != nil {
+		return s.storage.Close()
+	}
+	return nil
+}
+
+// TriggerTask manually triggers a task (for dependencies and watchers)
+func (s *Scheduler) TriggerTask(task *model.Task) {
+	// Check if task is enabled
+	if !task.Enabled {
+		return
+	}
+
+	// For dependency tasks, check if dependencies are satisfied
+	if task.TriggerType == model.TriggerTypeDependency {
+		if satisfied, unsatisfied := s.dependencyManager.CheckDependencies(task); !satisfied {
+			// Add to pending executions
+			for _, depID := range unsatisfied {
+				s.dependencyManager.AddPendingExecution(depID, task.ID)
+			}
+			return
+		}
+	}
+
+	// Execute the task immediately
+	go s.executeTaskNow(task)
+}
+
+// executeTaskNow executes a task immediately
+func (s *Scheduler) executeTaskNow(task *model.Task) {
+	if s.taskExecutor == nil {
+		fmt.Printf("Cannot execute task %s: no task executor set\n", task.ID)
+		return
+	}
+
+	task.LastRun = time.Now()
+	task.Status = model.StatusRunning
+	s.saveTaskToStorage(task)
+
+	ctx := context.Background()
+	timeout := s.config.DefaultTimeout
+
+	// Execute the task
+	if err := s.taskExecutor.Execute(ctx, task, timeout); err != nil {
+		task.Status = model.StatusFailed
+	} else {
+		task.Status = model.StatusCompleted
+		// Notify dependency manager of completion
+		s.dependencyManager.OnTaskCompleted(task.ID)
+	}
+
+	task.UpdatedAt = time.Now()
+	s.saveTaskToStorage(task)
+}
+
+// handleTaskScheduling handles scheduling based on trigger type
+func (s *Scheduler) handleTaskScheduling(task *model.Task) error {
+	switch task.TriggerType {
+	case model.TriggerTypeSchedule:
+		return s.scheduleTask(task)
+	case model.TriggerTypeWatcher:
+		if s.watcherManager != nil {
+			return s.watcherManager.StartWatcher(task)
+		}
+		return fmt.Errorf("watcher manager not available")
+	case model.TriggerTypeDependency:
+		// Dependencies are handled when dependency tasks complete
+		return nil
+	case model.TriggerTypeManual:
+		// Manual tasks are only triggered via run_task
+		return nil
+	default:
+		return fmt.Errorf("unknown trigger type: %s", task.TriggerType)
 	}
 }

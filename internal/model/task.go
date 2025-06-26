@@ -59,14 +59,45 @@ type Task struct {
 	UpdatedAt   time.Time  `json:"updatedAt,omitempty"`
 
 	// Conversation and agent support
-	ConversationID      string     `json:"conversationId,omitempty" description:"OpenWebUI conversation ID for persistent context"`
-	ConversationName    string     `json:"conversationName,omitempty" description:"Human-readable name for the conversation"`
-	ConversationContext string     `json:"conversationContext,omitempty" description:"Additional context for the conversation"`
-	IsAgent             bool       `json:"isAgent,omitempty" description:"Whether this task represents an autonomous agent"`
-	AgentPersonality    string     `json:"agentPersonality,omitempty" description:"Personality/role description for the agent"`
-	MemorySummary       string     `json:"memorySummary,omitempty" description:"Summarized memory from previous executions"`
-	LastMemoryUpdate    *time.Time `json:"lastMemoryUpdate,omitempty" description:"When memory was last updated"`
+	ConversationID      string         `json:"conversationId,omitempty" description:"OpenWebUI conversation ID for persistent context"`
+	ConversationName    string         `json:"conversationName,omitempty" description:"Human-readable name for the conversation"`
+	ConversationContext string         `json:"conversationContext,omitempty" description:"Additional context for the conversation"`
+	IsAgent             bool           `json:"isAgent,omitempty" description:"Whether this task represents an autonomous agent"`
+	AgentPersonality    string         `json:"agentPersonality,omitempty" description:"Personality/role description for the agent"`
+	MemorySummary       string         `json:"memorySummary,omitempty" description:"Summarized memory from previous executions"`
+	LastMemoryUpdate    *time.Time     `json:"lastMemoryUpdate,omitempty" description:"When memory was last updated"`
+	DependsOn           []string       `json:"dependsOn,omitempty" description:"task IDs this task depends on"`
+	TriggerType         string         `json:"triggerType,omitempty" description:"trigger type: schedule, dependency, watcher, manual"`
+	WatcherConfig       *WatcherConfig `json:"watcherConfig,omitempty" description:"configuration for watcher tasks"`
+	RunOnDemandOnly     bool           `json:"runOnDemandOnly,omitempty" description:"task only runs when manually triggered"`
 }
+
+// WatcherConfig defines what a watcher task should monitor
+type WatcherConfig struct {
+	Type          string            `json:"type" description:"watcher type: file_creation, task_completion, file_change"`
+	WatchPath     string            `json:"watchPath,omitempty" description:"path to watch for file watchers"`
+	FilePattern   string            `json:"filePattern,omitempty" description:"file pattern to match"`
+	WatchTaskIDs  []string          `json:"watchTaskIDs,omitempty" description:"task IDs to watch for completion"`
+	CheckInterval string            `json:"checkInterval,omitempty" description:"how often to check (e.g., '30s', '1m')"`
+	TriggerOnce   bool              `json:"triggerOnce" description:"only trigger once per condition"`
+	LastTriggered *time.Time        `json:"lastTriggered,omitempty" description:"when this watcher last triggered"`
+	Metadata      map[string]string `json:"metadata,omitempty" description:"additional watcher-specific config"`
+}
+
+// TaskTriggerType constants
+const (
+	TriggerTypeSchedule   = "schedule"
+	TriggerTypeDependency = "dependency"
+	TriggerTypeWatcher    = "watcher"
+	TriggerTypeManual     = "manual"
+)
+
+// WatcherType constants
+const (
+	WatcherTypeFileCreation   = "file_creation"
+	WatcherTypeFileChange     = "file_change"
+	WatcherTypeTaskCompletion = "task_completion"
+)
 
 // Result contains the results of a task execution
 type Result struct {

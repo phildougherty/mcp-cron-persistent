@@ -3,6 +3,7 @@ package storage
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -45,7 +46,7 @@ func (s *SQLiteStorage) createTables() error {
             description TEXT,
             command TEXT,
             prompt TEXT,
-            schedule TEXT NOT NULL,
+            schedule TEXT,
             enabled BOOLEAN NOT NULL,
             type TEXT NOT NULL,
             last_run TEXT,
@@ -59,13 +60,19 @@ func (s *SQLiteStorage) createTables() error {
             is_agent BOOLEAN DEFAULT FALSE,
             agent_personality TEXT,
             memory_summary TEXT,
-            last_memory_update TEXT
+            last_memory_update TEXT,
+            depends_on TEXT,
+            trigger_type TEXT,
+            watcher_config TEXT,
+            run_on_demand_only BOOLEAN DEFAULT FALSE
         );
         CREATE INDEX IF NOT EXISTS idx_tasks_enabled ON tasks(enabled);
         CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
         CREATE INDEX IF NOT EXISTS idx_tasks_type ON tasks(type);
         CREATE INDEX IF NOT EXISTS idx_tasks_conversation_id ON tasks(conversation_id);
         CREATE INDEX IF NOT EXISTS idx_tasks_is_agent ON tasks(is_agent);
+        CREATE INDEX IF NOT EXISTS idx_tasks_trigger_type ON tasks(trigger_type);
+        CREATE INDEX IF NOT EXISTS idx_tasks_run_on_demand_only ON tasks(run_on_demand_only);
 
         CREATE TABLE IF NOT EXISTS conversations (
             id TEXT PRIMARY KEY,
@@ -102,9 +109,15 @@ func (s *SQLiteStorage) SaveTask(task *model.Task) error {
             id, name, description, command, prompt, schedule, enabled, type,
             last_run, next_run, status, created_at, updated_at,
             conversation_id, conversation_name, conversation_context,
-            is_agent, agent_personality, memory_summary, last_memory_update
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            is_agent, agent_personality, memory_summary, last_memory_update,
+            depends_on, trigger_type, watcher_config, run_on_demand_only
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `
+
+	// Convert slice and struct to JSON for storage
+	dependsOnJSON, _ := json.Marshal(task.DependsOn)
+	watcherConfigJSON, _ := json.Marshal(task.WatcherConfig)
+
 	_, err := s.db.Exec(query,
 		task.ID,
 		task.Name,
@@ -126,6 +139,10 @@ func (s *SQLiteStorage) SaveTask(task *model.Task) error {
 		task.AgentPersonality,
 		task.MemorySummary,
 		formatTimePtr(task.LastMemoryUpdate),
+		string(dependsOnJSON),
+		task.TriggerType,
+		string(watcherConfigJSON),
+		task.RunOnDemandOnly,
 	)
 	return err
 }
@@ -136,7 +153,8 @@ func (s *SQLiteStorage) LoadTask(id string) (*model.Task, error) {
         SELECT id, name, description, command, prompt, schedule, enabled, type,
                last_run, next_run, status, created_at, updated_at,
                conversation_id, conversation_name, conversation_context,
-               is_agent, agent_personality, memory_summary, last_memory_update
+               is_agent, agent_personality, memory_summary, last_memory_update,
+               depends_on, trigger_type, watcher_config, run_on_demand_only
         FROM tasks WHERE id = ?
     `
 	row := s.db.QueryRow(query, id)
@@ -153,7 +171,8 @@ func (s *SQLiteStorage) LoadAllTasks() ([]*model.Task, error) {
         SELECT id, name, description, command, prompt, schedule, enabled, type,
                last_run, next_run, status, created_at, updated_at,
                conversation_id, conversation_name, conversation_context,
-               is_agent, agent_personality, memory_summary, last_memory_update
+               is_agent, agent_personality, memory_summary, last_memory_update,
+               depends_on, trigger_type, watcher_config, run_on_demand_only
         FROM tasks ORDER BY created_at
     `
 	rows, err := s.db.Query(query)
@@ -185,8 +204,9 @@ func (s *SQLiteStorage) scanTask(scanner interface{ Scan(...interface{}) error }
 	var task model.Task
 	var lastRunStr, nextRunStr, createdAtStr, updatedAtStr string
 	var conversationID, conversationName, conversationContext sql.NullString
-	var isAgent sql.NullBool
+	var isAgent, runOnDemandOnly sql.NullBool
 	var agentPersonality, memorySummary, lastMemoryUpdateStr sql.NullString
+	var dependsOnStr, triggerType, watcherConfigStr sql.NullString
 
 	err := scanner.Scan(
 		&task.ID,
@@ -209,6 +229,10 @@ func (s *SQLiteStorage) scanTask(scanner interface{ Scan(...interface{}) error }
 		&agentPersonality,
 		&memorySummary,
 		&lastMemoryUpdateStr,
+		&dependsOnStr,
+		&triggerType,
+		&watcherConfigStr,
+		&runOnDemandOnly,
 	)
 	if err != nil {
 		return nil, err
@@ -251,6 +275,26 @@ func (s *SQLiteStorage) scanTask(scanner interface{ Scan(...interface{}) error }
 		if parsed, err := time.Parse(time.RFC3339, lastMemoryUpdateStr.String); err == nil {
 			task.LastMemoryUpdate = &parsed
 		}
+	}
+
+	// Parse new fields
+	if dependsOnStr.Valid && dependsOnStr.String != "" {
+		json.Unmarshal([]byte(dependsOnStr.String), &task.DependsOn)
+	}
+
+	if triggerType.Valid {
+		task.TriggerType = triggerType.String
+	}
+
+	if watcherConfigStr.Valid && watcherConfigStr.String != "" {
+		var config model.WatcherConfig
+		if err := json.Unmarshal([]byte(watcherConfigStr.String), &config); err == nil {
+			task.WatcherConfig = &config
+		}
+	}
+
+	if runOnDemandOnly.Valid {
+		task.RunOnDemandOnly = runOnDemandOnly.Bool
 	}
 
 	return &task, nil
@@ -349,6 +393,7 @@ func (s *SQLiteStorage) LoadTaskResults(taskID string, limit int) ([]*model.Resu
 		if result.EndTime, err = time.Parse(time.RFC3339, endTimeStr); err != nil {
 			return nil, fmt.Errorf("failed to parse end_time: %w", err)
 		}
+
 		if conversationID.Valid {
 			result.ConversationID = conversationID.String
 		}
@@ -384,7 +429,6 @@ func (s *SQLiteStorage) LoadConversation(id string) (*model.Conversation, error)
         FROM conversations WHERE id = ?
     `
 	row := s.db.QueryRow(query, id)
-
 	var conv model.Conversation
 	var createdAtStr, updatedAtStr, lastUsedStr string
 	err := row.Scan(
