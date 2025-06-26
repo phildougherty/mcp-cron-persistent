@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jolks/mcp-cron/internal/model"
@@ -39,66 +40,175 @@ func (s *SQLiteStorage) Close() error {
 
 // createTables creates the necessary tables if they don't exist
 func (s *SQLiteStorage) createTables() error {
-	query := `
-        CREATE TABLE IF NOT EXISTS tasks (
-            id TEXT PRIMARY KEY,
-            name TEXT NOT NULL,
-            description TEXT,
-            command TEXT,
-            prompt TEXT,
-            schedule TEXT,
-            enabled BOOLEAN NOT NULL,
-            type TEXT NOT NULL,
-            last_run TEXT,
-            next_run TEXT,
-            status TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            conversation_id TEXT,
-            conversation_name TEXT,
-            conversation_context TEXT,
-            is_agent BOOLEAN DEFAULT FALSE,
-            agent_personality TEXT,
-            memory_summary TEXT,
-            last_memory_update TEXT,
-            depends_on TEXT,
-            trigger_type TEXT,
-            watcher_config TEXT,
-            run_on_demand_only BOOLEAN DEFAULT FALSE
-        );
-        CREATE INDEX IF NOT EXISTS idx_tasks_enabled ON tasks(enabled);
-        CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
-        CREATE INDEX IF NOT EXISTS idx_tasks_type ON tasks(type);
-        CREATE INDEX IF NOT EXISTS idx_tasks_conversation_id ON tasks(conversation_id);
-        CREATE INDEX IF NOT EXISTS idx_tasks_is_agent ON tasks(is_agent);
-        CREATE INDEX IF NOT EXISTS idx_tasks_trigger_type ON tasks(trigger_type);
-        CREATE INDEX IF NOT EXISTS idx_tasks_run_on_demand_only ON tasks(run_on_demand_only);
+	// Get current schema version
+	currentVersion, err := s.getSchemaVersion()
+	if err != nil {
+		return fmt.Errorf("failed to get schema version: %w", err)
+	}
 
-        CREATE TABLE IF NOT EXISTS conversations (
-            id TEXT PRIMARY KEY,
-            name TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            last_used TEXT,
-            context TEXT,
-            type TEXT DEFAULT 'task',
-            description TEXT
-        );
-        CREATE INDEX IF NOT EXISTS idx_conversations_type ON conversations(type);
-        CREATE INDEX IF NOT EXISTS idx_conversations_last_used ON conversations(last_used);
+	// Run migrations based on current version
+	if err := s.runMigrationsFromVersion(currentVersion); err != nil {
+		return fmt.Errorf("failed to run migrations: %w", err)
+	}
 
-        CREATE TABLE IF NOT EXISTS task_memory (
-            task_id TEXT NOT NULL,
-            memory_key TEXT NOT NULL,
-            memory_value TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            PRIMARY KEY (task_id, memory_key),
-            FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+	return nil
+}
+
+// runMigrationsFromVersion runs all migrations from the current version to the latest
+func (s *SQLiteStorage) runMigrationsFromVersion(currentVersion int) error {
+	migrations := []struct {
+		version int
+		name    string
+		sql     string
+	}{
+		{
+			version: 1,
+			name:    "initial_schema",
+			sql: `
+                CREATE TABLE IF NOT EXISTS tasks (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    description TEXT,
+                    command TEXT,
+                    prompt TEXT,
+                    schedule TEXT NOT NULL,
+                    enabled BOOLEAN NOT NULL,
+                    type TEXT NOT NULL,
+                    last_run TEXT,
+                    next_run TEXT,
+                    status TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    conversation_id TEXT,
+                    conversation_name TEXT,
+                    conversation_context TEXT,
+                    is_agent BOOLEAN DEFAULT FALSE,
+                    agent_personality TEXT,
+                    memory_summary TEXT,
+                    last_memory_update TEXT
+                );
+
+                CREATE TABLE IF NOT EXISTS conversations (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    last_used TEXT,
+                    context TEXT,
+                    type TEXT DEFAULT 'task',
+                    description TEXT
+                );
+
+                CREATE TABLE IF NOT EXISTS task_memory (
+                    task_id TEXT NOT NULL,
+                    memory_key TEXT NOT NULL,
+                    memory_value TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY (task_id, memory_key),
+                    FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_tasks_enabled ON tasks(enabled);
+                CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
+                CREATE INDEX IF NOT EXISTS idx_tasks_type ON tasks(type);
+                CREATE INDEX IF NOT EXISTS idx_tasks_conversation_id ON tasks(conversation_id);
+                CREATE INDEX IF NOT EXISTS idx_tasks_is_agent ON tasks(is_agent);
+                CREATE INDEX IF NOT EXISTS idx_conversations_type ON conversations(type);
+                CREATE INDEX IF NOT EXISTS idx_conversations_last_used ON conversations(last_used);
+                CREATE INDEX IF NOT EXISTS idx_task_memory_task_id ON task_memory(task_id);
+            `,
+		},
+		{
+			version: 2,
+			name:    "add_dependency_and_watcher_support",
+			sql: `
+                ALTER TABLE tasks ADD COLUMN depends_on TEXT;
+                ALTER TABLE tasks ADD COLUMN trigger_type TEXT;
+                ALTER TABLE tasks ADD COLUMN watcher_config TEXT;
+                ALTER TABLE tasks ADD COLUMN run_on_demand_only BOOLEAN DEFAULT FALSE;
+
+                CREATE INDEX IF NOT EXISTS idx_tasks_trigger_type ON tasks(trigger_type);
+                CREATE INDEX IF NOT EXISTS idx_tasks_run_on_demand_only ON tasks(run_on_demand_only);
+            `,
+		},
+	}
+
+	// Run migrations
+	for _, migration := range migrations {
+		if currentVersion < migration.version {
+			if err := s.executeMigration(migration); err != nil {
+				return fmt.Errorf("failed to execute migration %d (%s): %w", migration.version, migration.name, err)
+			}
+
+			// Update schema version
+			if err := s.setSchemaVersion(migration.version); err != nil {
+				return fmt.Errorf("failed to update schema version to %d: %w", migration.version, err)
+			}
+		}
+	}
+
+	return nil
+}
+
+// executeMigration executes a single migration
+func (s *SQLiteStorage) executeMigration(migration struct {
+	version int
+	name    string
+	sql     string
+}) error {
+	// Split the SQL into individual statements and execute them
+	statements := strings.Split(migration.sql, ";")
+
+	for _, stmt := range statements {
+		stmt = strings.TrimSpace(stmt)
+		if stmt == "" {
+			continue
+		}
+
+		if _, err := s.db.Exec(stmt); err != nil {
+			// For ALTER TABLE statements, check if the column already exists
+			if strings.Contains(err.Error(), "duplicate column name") ||
+				strings.Contains(err.Error(), "column already exists") {
+				continue // Skip if column already exists
+			}
+			return fmt.Errorf("failed to execute statement: %s, error: %w", stmt, err)
+		}
+	}
+
+	return nil
+}
+
+// getSchemaVersion gets the current schema version
+func (s *SQLiteStorage) getSchemaVersion() (int, error) {
+	// Create schema_version table if it doesn't exist
+	createVersionTable := `
+        CREATE TABLE IF NOT EXISTS schema_version (
+            version INTEGER PRIMARY KEY
         );
-        CREATE INDEX IF NOT EXISTS idx_task_memory_task_id ON task_memory(task_id);
     `
-	_, err := s.db.Exec(query)
+	if _, err := s.db.Exec(createVersionTable); err != nil {
+		return 0, err
+	}
+
+	// Get current version
+	var version int
+	err := s.db.QueryRow("SELECT version FROM schema_version ORDER BY version DESC LIMIT 1").Scan(&version)
+	if err != nil && err != sql.ErrNoRows {
+		return 0, err
+	}
+
+	// If no version found, we're starting fresh
+	if err == sql.ErrNoRows {
+		return 0, nil
+	}
+
+	return version, nil
+}
+
+// setSchemaVersion sets the current schema version
+func (s *SQLiteStorage) setSchemaVersion(version int) error {
+	_, err := s.db.Exec("INSERT INTO schema_version (version) VALUES (?)", version)
 	return err
 }
 
@@ -149,12 +259,16 @@ func (s *SQLiteStorage) SaveTask(task *model.Task) error {
 
 // LoadTask loads a task by ID from the database
 func (s *SQLiteStorage) LoadTask(id string) (*model.Task, error) {
+	// Try new schema first, fall back to old if needed
 	query := `
         SELECT id, name, description, command, prompt, schedule, enabled, type,
                last_run, next_run, status, created_at, updated_at,
                conversation_id, conversation_name, conversation_context,
                is_agent, agent_personality, memory_summary, last_memory_update,
-               depends_on, trigger_type, watcher_config, run_on_demand_only
+               COALESCE(depends_on, '') as depends_on,
+               COALESCE(trigger_type, '') as trigger_type,
+               COALESCE(watcher_config, '') as watcher_config,
+               COALESCE(run_on_demand_only, FALSE) as run_on_demand_only
         FROM tasks WHERE id = ?
     `
 	row := s.db.QueryRow(query, id)
@@ -172,7 +286,10 @@ func (s *SQLiteStorage) LoadAllTasks() ([]*model.Task, error) {
                last_run, next_run, status, created_at, updated_at,
                conversation_id, conversation_name, conversation_context,
                is_agent, agent_personality, memory_summary, last_memory_update,
-               depends_on, trigger_type, watcher_config, run_on_demand_only
+               COALESCE(depends_on, '') as depends_on,
+               COALESCE(trigger_type, '') as trigger_type,
+               COALESCE(watcher_config, '') as watcher_config,
+               COALESCE(run_on_demand_only, FALSE) as run_on_demand_only
         FROM tasks ORDER BY created_at
     `
 	rows, err := s.db.Query(query)
@@ -277,16 +394,30 @@ func (s *SQLiteStorage) scanTask(scanner interface{ Scan(...interface{}) error }
 		}
 	}
 
-	// Parse new fields
-	if dependsOnStr.Valid && dependsOnStr.String != "" {
-		json.Unmarshal([]byte(dependsOnStr.String), &task.DependsOn)
+	// Parse new fields with defaults
+	if dependsOnStr.Valid && dependsOnStr.String != "" && dependsOnStr.String != "null" {
+		if err := json.Unmarshal([]byte(dependsOnStr.String), &task.DependsOn); err != nil {
+			// If unmarshaling fails, initialize empty slice
+			task.DependsOn = make([]string, 0)
+		}
+	} else {
+		task.DependsOn = make([]string, 0)
 	}
 
-	if triggerType.Valid {
+	if triggerType.Valid && triggerType.String != "" {
 		task.TriggerType = triggerType.String
+	} else {
+		// Set default trigger type based on task properties
+		if len(task.DependsOn) > 0 {
+			task.TriggerType = model.TriggerTypeDependency
+		} else if task.Schedule != "" {
+			task.TriggerType = model.TriggerTypeSchedule
+		} else {
+			task.TriggerType = model.TriggerTypeManual
+		}
 	}
 
-	if watcherConfigStr.Valid && watcherConfigStr.String != "" {
+	if watcherConfigStr.Valid && watcherConfigStr.String != "" && watcherConfigStr.String != "null" {
 		var config model.WatcherConfig
 		if err := json.Unmarshal([]byte(watcherConfigStr.String), &config); err == nil {
 			task.WatcherConfig = &config
