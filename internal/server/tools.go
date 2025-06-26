@@ -110,12 +110,9 @@ func (s *MCPServer) registerToolsDeclarative() {
 			Name:        "export_runs",
 			Description: "Exports run data in various formats (JSON, CSV, Markdown)",
 			Handler:     s.handleExportRuns,
-			Parameters: struct {
-				Format string `json:"format,omitempty" description:"export format: json, csv, markdown (default: json)"`
-				Since  string `json:"since,omitempty" description:"export runs since date (YYYY-MM-DD)"`
-				TaskID string `json:"task_id,omitempty" description:"filter by specific task ID"`
-			}{},
+			Parameters:  ExportRunsParams{}, // Use the proper struct instead of inline struct
 		},
+		// Add the new dependency and watcher tools
 		{
 			Name:        "add_dependency_task",
 			Description: "Adds a new task that depends on other tasks completing first",

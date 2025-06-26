@@ -33,6 +33,13 @@ type RunSearchParams struct {
 	Limit    int    `json:"limit,omitempty" description:"limit number of results (default: 20)"`
 }
 
+// ExportRunsParams holds parameters for exporting runs
+type ExportRunsParams struct {
+	Format string `json:"format,omitempty" description:"export format: json, csv, markdown (default: json)"`
+	Since  string `json:"since,omitempty" description:"export runs since date (YYYY-MM-DD)"`
+	TaskID string `json:"task_id,omitempty" description:"filter by specific task ID"`
+}
+
 // RunSummary represents a summary of task runs
 type RunSummary struct {
 	TaskID     string    `json:"task_id"`
