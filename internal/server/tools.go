@@ -19,7 +19,7 @@ type ToolDefinition struct {
 }
 
 func (s *MCPServer) registerToolsDeclarative() {
-	// Define all the tools in one place - start with basic ones first
+	// Define all the tools in one place
 	tools := []ToolDefinition{
 		{
 			Name:        "list_tasks",
@@ -99,45 +99,42 @@ func (s *MCPServer) registerToolsDeclarative() {
 			Handler:     s.handleExportRuns,
 			Parameters:  ExportRunsParams{},
 		},
-		// Comment out the new tools temporarily to see if they're causing the issue
-		/*
-		   {
-		       Name:        "create_agent",
-		       Description: "Create a new autonomous AI agent with persistent conversation and memory",
-		       Handler:     s.handleCreateAgent,
-		       Parameters:  AgentParams{},
-		   },
-		   {
-		       Name:        "spawn_agent",
-		       Description: "Spawn a new agent using natural language description",
-		       Handler:     s.handleSpawnAgent,
-		       Parameters:  SpawnAgentParams{},
-		   },
-		   {
-		       Name:        "add_dependency_task",
-		       Description: "Adds a new task that depends on other tasks completing first",
-		       Handler:     s.handleAddDependencyTask,
-		       Parameters:  DependencyTaskParams{},
-		   },
-		   {
-		       Name:        "add_watcher_task",
-		       Description: "Adds a new watcher task that triggers on file changes or task completions",
-		       Handler:     s.handleAddWatcherTask,
-		       Parameters:  WatcherTaskParams{},
-		   },
-		   {
-		       Name:        "add_manual_task",
-		       Description: "Adds a new task that only runs when manually triggered",
-		       Handler:     s.handleAddManualTask,
-		       Parameters:  AITaskParams{},
-		   },
-		   {
-		       Name:        "trigger_dependency_chain",
-		       Description: "Manually triggers a dependency chain starting from a specific task",
-		       Handler:     s.handleTriggerDependencyChain,
-		       Parameters:  TaskIDParams{},
-		   },
-		*/
+		{
+			Name:        "create_agent",
+			Description: "Create a new autonomous AI agent with persistent conversation and memory",
+			Handler:     s.handleCreateAgent,
+			Parameters:  AgentParams{},
+		},
+		{
+			Name:        "spawn_agent",
+			Description: "Spawn a new agent using natural language description",
+			Handler:     s.handleSpawnAgent,
+			Parameters:  SpawnAgentParams{},
+		},
+		{
+			Name:        "add_dependency_task",
+			Description: "Adds a new task that depends on other tasks completing first",
+			Handler:     s.handleAddDependencyTask,
+			Parameters:  DependencyTaskParams{},
+		},
+		{
+			Name:        "add_watcher_task",
+			Description: "Adds a new watcher task that triggers on file changes or task completions",
+			Handler:     s.handleAddWatcherTask,
+			Parameters:  WatcherTaskParams{},
+		},
+		{
+			Name:        "add_manual_task",
+			Description: "Adds a new task that only runs when manually triggered",
+			Handler:     s.handleAddManualTask,
+			Parameters:  AITaskParams{},
+		},
+		{
+			Name:        "trigger_dependency_chain",
+			Description: "Manually triggers a dependency chain starting from a specific task",
+			Handler:     s.handleTriggerDependencyChain,
+			Parameters:  TaskIDParams{},
+		},
 	}
 
 	// Register all the tools

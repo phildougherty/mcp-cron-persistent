@@ -74,14 +74,15 @@ type Task struct {
 
 // WatcherConfig defines what a watcher task should monitor
 type WatcherConfig struct {
-	Type          string            `json:"type" description:"watcher type: file_creation, task_completion, file_change"`
-	WatchPath     string            `json:"watchPath,omitempty" description:"path to watch for file watchers"`
-	FilePattern   string            `json:"filePattern,omitempty" description:"file pattern to match"`
-	WatchTaskIDs  []string          `json:"watchTaskIDs,omitempty" description:"task IDs to watch for completion"`
-	CheckInterval string            `json:"checkInterval,omitempty" description:"how often to check (e.g., '30s', '1m')"`
-	TriggerOnce   bool              `json:"triggerOnce" description:"only trigger once per condition"`
-	LastTriggered *time.Time        `json:"lastTriggered,omitempty" description:"when this watcher last triggered"`
-	Metadata      map[string]string `json:"metadata,omitempty" description:"additional watcher-specific config"`
+	Type          string     `json:"type" description:"watcher type: file_creation, task_completion, file_change"`
+	WatchPath     string     `json:"watchPath,omitempty" description:"path to watch for file watchers"`
+	FilePattern   string     `json:"filePattern,omitempty" description:"file pattern to match"`
+	WatchTaskIDs  []string   `json:"watchTaskIDs,omitempty" description:"task IDs to watch for completion"`
+	CheckInterval string     `json:"checkInterval,omitempty" description:"how often to check (e.g., '30s', '1m')"`
+	TriggerOnce   bool       `json:"triggerOnce" description:"only trigger once per condition"`
+	LastTriggered *time.Time `json:"lastTriggered,omitempty" description:"when this watcher last triggered"`
+	Description   string     `json:"description,omitempty" description:"additional description for the watcher"`
+	CustomConfig  string     `json:"customConfig,omitempty" description:"custom configuration as JSON string"`
 }
 
 // TaskTriggerType constants
