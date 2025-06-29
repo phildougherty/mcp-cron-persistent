@@ -24,6 +24,23 @@ type Config struct {
 	Database      DatabaseConfig
 	OpenRouter    OpenRouterConfig
 	UseOpenRouter bool
+	Ollama        OllamaConfig      `json:"ollama"`
+	ModelRouter   ModelRouterConfig `json:"modelRouter"`
+}
+
+type OllamaConfig struct {
+	Enabled bool   `json:"enabled"`
+	BaseURL string `json:"baseUrl"`
+}
+
+type ModelRouterConfig struct {
+	Enabled          bool    `json:"enabled"`
+	PreferLocal      bool    `json:"preferLocal"`
+	MaxCostPerTask   float64 `json:"maxCostPerTask"`
+	SpeedWeight      float64 `json:"speedWeight"`
+	CostWeight       float64 `json:"costWeight"`
+	CapabilityWeight float64 `json:"capabilityWeight"`
+	SecurityWeight   float64 `json:"securityWeight"`
 }
 
 // ServerConfig holds server-specific configuration
@@ -122,6 +139,19 @@ func DefaultConfig() *Config {
 			MCPProxyURL: "http://localhost:9876", // Default, override via env
 			MCPProxyKey: "",                      // Must be set via environment
 			Enabled:     false,
+		},
+		Ollama: OllamaConfig{
+			Enabled: true,
+			BaseURL: "http://localhost:11434",
+		},
+		ModelRouter: ModelRouterConfig{
+			Enabled:          true,
+			PreferLocal:      true,
+			MaxCostPerTask:   0.50,
+			SpeedWeight:      0.3,
+			CostWeight:       0.4,
+			CapabilityWeight: 0.2,
+			SecurityWeight:   0.1,
 		},
 		UseOpenRouter: false,
 	}
@@ -274,6 +304,27 @@ func FromEnv(config *Config) {
 	}
 	if val := os.Getenv("USE_OPENROUTER"); val != "" {
 		config.UseOpenRouter = strings.ToLower(val) == "true"
+	}
+
+	// OLLAMA configuration
+	if val := os.Getenv("OLLAMA_URL"); val != "" {
+		config.Ollama.BaseURL = val
+	}
+	if val := os.Getenv("OLLAMA_ENABLED"); val != "" {
+		config.Ollama.Enabled = strings.ToLower(val) == "true"
+	}
+
+	// Model router configuration
+	if val := os.Getenv("MODEL_ROUTER_ENABLED"); val != "" {
+		config.ModelRouter.Enabled = strings.ToLower(val) == "true"
+	}
+	if val := os.Getenv("MODEL_ROUTER_PREFER_LOCAL"); val != "" {
+		config.ModelRouter.PreferLocal = strings.ToLower(val) == "true"
+	}
+	if val := os.Getenv("MODEL_ROUTER_MAX_COST"); val != "" {
+		if cost, err := strconv.ParseFloat(val, 64); err == nil {
+			config.ModelRouter.MaxCostPerTask = cost
+		}
 	}
 
 	// Auto-logic: if USE_OPENROUTER is true or OpenRouter is enabled, disable OpenWebUI

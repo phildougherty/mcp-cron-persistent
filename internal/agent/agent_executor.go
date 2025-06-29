@@ -113,3 +113,9 @@ func (ae *AgentExecutor) GetTaskResult(taskID string) (*model.Result, bool) {
 	result, exists := ae.results[taskID]
 	return result, exists
 }
+
+func (ae *AgentExecutor) StoreResult(taskID string, result *model.Result) {
+	ae.mu.Lock()
+	defer ae.mu.Unlock()
+	ae.results[taskID] = result
+}

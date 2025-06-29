@@ -174,6 +174,18 @@ func (s *MCPServer) registerToolsDeclarative() {
 			Handler:     s.handleListHolidays,
 			Parameters:  HolidayQueryParams{},
 		},
+		{
+			Name:        "list_models",
+			Description: "List all available models from OpenRouter and OLLAMA",
+			Handler:     s.handleListModels,
+			Parameters:  struct{}{},
+		},
+		{
+			Name:        "batch_operations",
+			Description: "Perform multiple task operations in a single request with optional atomic transactions",
+			Handler:     s.handleBatchOperations,
+			Parameters:  BatchOperationParams{},
+		},
 	}
 
 	// Register all the tools

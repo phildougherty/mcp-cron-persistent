@@ -56,7 +56,11 @@ type AITaskParams struct {
 	Description string `json:"description,omitempty" description:"task description"`
 	Enabled     bool   `json:"enabled,omitempty" description:"whether the task is enabled"`
 	// LLM Prompt
-	Prompt string `json:"prompt,omitempty" description:"prompt to use for AI"`
+	Prompt       string  `json:"prompt,omitempty" description:"prompt to use for AI"`
+	Model        string  `json:"model,omitempty" description:"specific model to use"`
+	ModelHint    string  `json:"modelHint,omitempty" description:"hint for model selection: fast, cheap, powerful, local, balanced"`
+	RequireLocal bool    `json:"requireLocal,omitempty" description:"require local model execution"`
+	MaxCost      float64 `json:"maxCost,omitempty" description:"maximum cost per execution"`
 }
 
 // AgentParams holds parameters for agent creation
@@ -741,24 +745,38 @@ func (s *MCPServer) handleDisableTask(request *protocol.CallToolRequest) (*proto
 	return createTaskResponse(task)
 }
 
-// Execute implements the taskexec.Executor interface by routing tasks to the appropriate executor
 func (s *MCPServer) Execute(ctx context.Context, task *model.Task, timeout time.Duration) error {
-	// Get the task type
 	taskType := task.Type
 
-	// Route to the appropriate executor based on task type
 	s.logger.Debugf("Executing task with type: %s", taskType)
+
 	switch taskType {
 	case model.TypeAI.String():
-		// Use the agent executor for AI tasks
+		// Use model routing if enabled
+		if s.config.ModelRouter.Enabled {
+			result, err := agent.RunTaskWithModelRouting(ctx, task, s.config)
+			if err != nil {
+				return err
+			}
+			// Store the result
+			agentResult := &model.Result{
+				TaskID:    task.ID,
+				Prompt:    task.Prompt,
+				Output:    result,
+				StartTime: time.Now(),
+				EndTime:   time.Now(),
+				ExitCode:  0,
+			}
+			s.agentExecutor.StoreResult(task.ID, agentResult)
+			return nil
+		}
+		// Fallback to original agent executor
 		s.logger.Infof("Routing to AgentExecutor for AI task")
 		return s.agentExecutor.Execute(ctx, task, timeout)
 	case model.TypeShellCommand.String(), "":
-		// Use the command executor for shell command tasks or when type is not specified
 		s.logger.Infof("Routing to CommandExecutor for shell command task")
 		return s.cmdExecutor.Execute(ctx, task, timeout)
 	default:
-		// Unknown task type
 		return fmt.Errorf("unknown task type: %s", taskType)
 	}
 }
@@ -894,4 +912,60 @@ func (s *MCPServer) handleListHolidays(request *protocol.CallToolRequest) (*prot
 			},
 		},
 	}, nil
+}
+
+func (s *MCPServer) detectTaskType(content string) string {
+	content = strings.ToLower(content)
+
+	// Look for AI/LLM keywords
+	aiKeywords := []string{
+		"analyze", "summarize", "generate", "explain", "describe",
+		"write", "create", "suggest", "recommend", "translate",
+		"what", "how", "why", "tell me", "help me",
+	}
+
+	for _, keyword := range aiKeywords {
+		if strings.Contains(content, keyword) {
+			return model.TypeAI.String()
+		}
+	}
+
+	// Look for shell command patterns
+	if strings.HasPrefix(content, "/") ||
+		strings.Contains(content, "&&") ||
+		strings.Contains(content, "||") ||
+		strings.Contains(content, "|") ||
+		strings.Contains(content, "echo") ||
+		strings.Contains(content, "curl") ||
+		strings.Contains(content, "wget") ||
+		strings.Contains(content, "grep") ||
+		strings.Contains(content, "awk") ||
+		strings.Contains(content, "sed") {
+		return model.TypeShellCommand.String()
+	}
+
+	// Default to AI if unsure
+	return model.TypeAI.String()
+}
+
+func (s *MCPServer) generateTaskName(content string) string {
+	// Clean and truncate content for name
+	name := strings.TrimSpace(content)
+
+	// Remove common prefixes
+	name = strings.TrimPrefix(name, "Please ")
+	name = strings.TrimPrefix(name, "Can you ")
+	name = strings.TrimPrefix(name, "Could you ")
+
+	// Truncate if too long
+	if len(name) > 50 {
+		name = name[:47] + "..."
+	}
+
+	// If still empty, provide default
+	if name == "" {
+		name = fmt.Sprintf("Task %d", time.Now().Unix())
+	}
+
+	return name
 }
