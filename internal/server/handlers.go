@@ -5,10 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"mcp-cron-persistent/internal/errors"
+	"mcp-cron-persistent/internal/model"
+	"mcp-cron-persistent/internal/utils"
+
 	"github.com/ThinkInAIXYZ/go-mcp/protocol"
-	"github.com/jolks/mcp-cron/internal/errors"
-	"github.com/jolks/mcp-cron/internal/model"
-	"github.com/jolks/mcp-cron/internal/utils"
 )
 
 // extractParams extracts parameters from a tool request

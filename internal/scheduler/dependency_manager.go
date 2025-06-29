@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jolks/mcp-cron/internal/model"
+	"mcp-cron-persistent/internal/model"
 )
 
 // DependencyManager handles task dependencies and execution chains

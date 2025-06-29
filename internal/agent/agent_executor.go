@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jolks/mcp-cron/internal/config"
-	"github.com/jolks/mcp-cron/internal/model"
+	"mcp-cron-persistent/internal/config"
+	"mcp-cron-persistent/internal/model"
 )
 
 // AgentExecutor handles executing commands with an agent

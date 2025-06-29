@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jolks/mcp-cron/internal/config"
-	"github.com/jolks/mcp-cron/internal/model"
+	"mcp-cron-persistent/internal/config"
+	"mcp-cron-persistent/internal/model"
 )
 
 // TestAgentExecutor is a test structure with a mockable RunTask function

@@ -5,9 +5,10 @@ package server
 import (
 	"fmt"
 
+	"mcp-cron-persistent/internal/errors"
+	"mcp-cron-persistent/internal/model"
+
 	"github.com/ThinkInAIXYZ/go-mcp/protocol"
-	"github.com/jolks/mcp-cron/internal/errors"
-	"github.com/jolks/mcp-cron/internal/model"
 )
 
 // handleAddManualTask adds a manual-only task

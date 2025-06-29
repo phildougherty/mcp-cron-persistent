@@ -6,12 +6,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jolks/mcp-cron/internal/agent"
-	"github.com/jolks/mcp-cron/internal/command"
-	"github.com/jolks/mcp-cron/internal/config"
-	"github.com/jolks/mcp-cron/internal/logging"
-	"github.com/jolks/mcp-cron/internal/model"
-	"github.com/jolks/mcp-cron/internal/scheduler"
+	"mcp-cron-persistent/internal/agent"
+	"mcp-cron-persistent/internal/command"
+	"mcp-cron-persistent/internal/config"
+	"mcp-cron-persistent/internal/logging"
+	"mcp-cron-persistent/internal/model"
+	"mcp-cron-persistent/internal/scheduler"
 )
 
 // TestTaskExecutorImplementation verifies that the MCPServer properly

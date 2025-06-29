@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jolks/mcp-cron/internal/logging"
-	"github.com/jolks/mcp-cron/internal/model"
+	"mcp-cron-persistent/internal/logging"
+	"mcp-cron-persistent/internal/model"
 )
 
 // WatcherManager handles file watchers and other trigger-based tasks

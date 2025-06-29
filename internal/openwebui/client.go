@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jolks/mcp-cron/internal/config"
-	"github.com/jolks/mcp-cron/internal/logging"
+	"mcp-cron-persistent/internal/config"
+	"mcp-cron-persistent/internal/logging"
 )
 
 // ChatRequest represents a chat request to OpenWebUI

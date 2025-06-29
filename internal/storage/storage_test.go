@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jolks/mcp-cron/internal/model"
+	"mcp-cron-persistent/internal/model"
 )
 
 func TestSQLiteStorage(t *testing.T) {

@@ -8,7 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jolks/mcp-cron/internal/model"
+	"mcp-cron-persistent/internal/model"
+
 	_ "modernc.org/sqlite"
 )
 

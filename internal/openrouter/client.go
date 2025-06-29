@@ -6,10 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mcp-cron-persistent/internal/logging"
 	"net/http"
 	"time"
-
-	"github.com/jolks/mcp-cron/internal/logging"
 )
 
 type Client struct {

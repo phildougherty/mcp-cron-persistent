@@ -5,11 +5,11 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/jolks/mcp-cron/internal/config"
-	"github.com/jolks/mcp-cron/internal/logging"
-	"github.com/jolks/mcp-cron/internal/model"
-	"github.com/jolks/mcp-cron/internal/openrouter"
-	"github.com/jolks/mcp-cron/internal/openwebui"
+	"mcp-cron-persistent/internal/config"
+	"mcp-cron-persistent/internal/logging"
+	"mcp-cron-persistent/internal/model"
+	"mcp-cron-persistent/internal/openrouter"
+	"mcp-cron-persistent/internal/openwebui"
 )
 
 // RunTask executes an AI task using either OpenRouter or OpenWebUI

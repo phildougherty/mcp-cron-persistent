@@ -12,17 +12,25 @@ import (
 	"sync"
 	"time"
 
+	"mcp-cron-persistent/internal/agent"
+	"mcp-cron-persistent/internal/observability"
+	"mcp-cron-persistent/internal/utils"
+
+	"mcp-cron-persistent/internal/scheduler"
+
+	"mcp-cron-persistent/internal/model"
+
+	"mcp-cron-persistent/internal/logging"
+
+	"mcp-cron-persistent/internal/errors"
+
+	"mcp-cron-persistent/internal/config"
+
+	"mcp-cron-persistent/internal/command"
+
 	"github.com/ThinkInAIXYZ/go-mcp/protocol"
 	"github.com/ThinkInAIXYZ/go-mcp/server"
 	"github.com/ThinkInAIXYZ/go-mcp/transport"
-	"github.com/jolks/mcp-cron/internal/agent"
-	"github.com/jolks/mcp-cron/internal/command"
-	"github.com/jolks/mcp-cron/internal/config"
-	"github.com/jolks/mcp-cron/internal/errors"
-	"github.com/jolks/mcp-cron/internal/logging"
-	"github.com/jolks/mcp-cron/internal/model"
-	"github.com/jolks/mcp-cron/internal/scheduler"
-	"github.com/jolks/mcp-cron/internal/utils"
 )
 
 // Make os.OpenFile mockable for testing
@@ -91,18 +99,20 @@ type RunTaskParams struct {
 
 // MCPServer represents the MCP scheduler server
 type MCPServer struct {
-	scheduler      *scheduler.Scheduler
-	cmdExecutor    *command.CommandExecutor
-	agentExecutor  *agent.AgentExecutor
-	server         *server.Server
-	address        string
-	port           int
-	stopCh         chan struct{}
-	wg             sync.WaitGroup
-	config         *config.Config
-	logger         *logging.Logger
-	shutdownMutex  sync.Mutex
-	isShuttingDown bool
+	scheduler        *scheduler.Scheduler
+	cmdExecutor      *command.CommandExecutor
+	agentExecutor    *agent.AgentExecutor
+	server           *server.Server
+	address          string
+	port             int
+	stopCh           chan struct{}
+	wg               sync.WaitGroup
+	config           *config.Config
+	logger           *logging.Logger
+	shutdownMutex    sync.Mutex
+	isShuttingDown   bool
+	metricsCollector *observability.MetricsCollector
+	storage          scheduler.Storage
 }
 
 // NewMCPServer creates a new MCP scheduler server

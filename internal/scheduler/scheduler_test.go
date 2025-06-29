@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jolks/mcp-cron/internal/config"
-	"github.com/jolks/mcp-cron/internal/model"
+	"mcp-cron-persistent/internal/config"
+	"mcp-cron-persistent/internal/model"
 )
 
 // MockTaskExecutor implements the model.Executor interface for testing

@@ -42,7 +42,7 @@ func (s TaskStatus) String() string {
 	return string(s)
 }
 
-// Task represents a scheduled task
+// Task represents a scheduled task with enhanced scheduling features
 type Task struct {
 	ID          string     `json:"id"`
 	Name        string     `json:"name"`
@@ -70,6 +70,24 @@ type Task struct {
 	TriggerType         string         `json:"triggerType,omitempty" description:"trigger type: schedule, dependency, watcher, manual"`
 	WatcherConfig       *WatcherConfig `json:"watcherConfig,omitempty" description:"configuration for watcher tasks"`
 	RunOnDemandOnly     bool           `json:"runOnDemandOnly,omitempty" description:"task only runs when manually triggered"`
+
+	// Enhanced scheduling fields
+	Timezone         string        `json:"timezone,omitempty" description:"IANA timezone for task execution"`
+	SkipHolidays     bool          `json:"skipHolidays,omitempty" description:"skip execution on holidays"`
+	HolidayRegion    string        `json:"holidayRegion,omitempty" description:"holiday region (US, UK, etc.)"`
+	TimeWindowID     string        `json:"timeWindowId,omitempty" description:"ID of time window constraint"`
+	MaxExecutionTime time.Duration `json:"maxExecutionTime,omitempty" description:"maximum allowed execution time"`
+	RetryPolicy      *RetryPolicy  `json:"retryPolicy,omitempty" description:"retry configuration"`
+
+	// AI workflow enhancement
+	MCPMemoryEnabled bool   `json:"mcpMemoryEnabled,omitempty" description:"enable MCP memory integration"`
+	WorkflowContext  string `json:"workflowContext,omitempty" description:"workflow context for AI tasks"`
+	LearningEnabled  bool   `json:"learningEnabled,omitempty" description:"enable learning from execution history"`
+
+	// Performance and monitoring
+	SLATarget      time.Duration     `json:"slaTarget,omitempty" description:"SLA target for execution time"`
+	AlertOnFailure bool              `json:"alertOnFailure,omitempty" description:"send alerts on task failure"`
+	MetricsLabels  map[string]string `json:"metricsLabels,omitempty" description:"custom metrics labels"`
 }
 
 // WatcherConfig defines what a watcher task should monitor
@@ -83,6 +101,35 @@ type WatcherConfig struct {
 	LastTriggered *time.Time `json:"lastTriggered,omitempty" description:"when this watcher last triggered"`
 	Description   string     `json:"description,omitempty" description:"additional description for the watcher"`
 	CustomConfig  string     `json:"customConfig,omitempty" description:"custom configuration as JSON string"`
+}
+
+// RetryPolicy defines retry behavior for failed tasks
+type RetryPolicy struct {
+	MaxRetries    int           `json:"maxRetries" description:"maximum number of retry attempts"`
+	InitialDelay  time.Duration `json:"initialDelay" description:"initial delay before first retry"`
+	BackoffFactor float64       `json:"backoffFactor" description:"multiplier for delay between retries"`
+	MaxDelay      time.Duration `json:"maxDelay" description:"maximum delay between retries"`
+}
+
+// TimeWindow represents a scheduled time window constraint
+type TimeWindow struct {
+	Start    string `json:"start" description:"start time in HH:MM format"`
+	End      string `json:"end" description:"end time in HH:MM format"`
+	Timezone string `json:"timezone" description:"IANA timezone for the time window"`
+	Days     []int  `json:"days" description:"allowed days of week (0=Sunday, 1=Monday, etc.)"`
+}
+
+// MaintenanceWindow represents a maintenance period
+type MaintenanceWindow struct {
+	ID          string    `json:"id" description:"unique identifier for the maintenance window"`
+	Name        string    `json:"name" description:"human-readable name for the maintenance window"`
+	Start       time.Time `json:"start" description:"start time of maintenance window"`
+	End         time.Time `json:"end" description:"end time of maintenance window"`
+	Timezone    string    `json:"timezone" description:"IANA timezone for the maintenance window"`
+	Description string    `json:"description" description:"description of maintenance activities"`
+	Enabled     bool      `json:"enabled" description:"whether the maintenance window is active"`
+	Recurring   bool      `json:"recurring" description:"whether the maintenance window repeats"`
+	Pattern     string    `json:"pattern,omitempty" description:"cron pattern for recurring maintenance"`
 }
 
 // TaskTriggerType constants
@@ -124,6 +171,34 @@ type Conversation struct {
 	Context     string    `json:"context,omitempty"`
 	Type        string    `json:"type,omitempty"` // "task", "agent", "user_initiated"
 	Description string    `json:"description,omitempty"`
+}
+
+// WorkflowStep represents a step in an AI workflow
+type WorkflowStep struct {
+	ID           string                 `json:"id" description:"unique identifier for the step"`
+	Name         string                 `json:"name" description:"human-readable name for the step"`
+	Type         string                 `json:"type" description:"step type: ai_task, shell_command, condition, loop"`
+	Prompt       string                 `json:"prompt,omitempty" description:"AI prompt for ai_task steps"`
+	Command      string                 `json:"command,omitempty" description:"shell command for shell_command steps"`
+	Condition    string                 `json:"condition,omitempty" description:"condition expression for condition steps"`
+	Dependencies []string               `json:"dependencies,omitempty" description:"step IDs this step depends on"`
+	Timeout      time.Duration          `json:"timeout,omitempty" description:"maximum execution time for this step"`
+	RetryPolicy  *RetryPolicy           `json:"retryPolicy,omitempty" description:"retry configuration for this step"`
+	Parameters   map[string]interface{} `json:"parameters,omitempty" description:"parameters for step execution"`
+	OnSuccess    []string               `json:"onSuccess,omitempty" description:"step IDs to execute on success"`
+	OnFailure    []string               `json:"onFailure,omitempty" description:"step IDs to execute on failure"`
+}
+
+// AIWorkflow represents a complex AI workflow
+type AIWorkflow struct {
+	ID          string                 `json:"id" description:"unique identifier for the workflow"`
+	Name        string                 `json:"name" description:"human-readable name for the workflow"`
+	Description string                 `json:"description" description:"description of the workflow"`
+	Steps       []WorkflowStep         `json:"steps" description:"workflow steps"`
+	StartStep   string                 `json:"startStep" description:"ID of the first step to execute"`
+	Variables   map[string]interface{} `json:"variables,omitempty" description:"workflow variables"`
+	CreatedAt   time.Time              `json:"createdAt" description:"when the workflow was created"`
+	UpdatedAt   time.Time              `json:"updatedAt" description:"when the workflow was last updated"`
 }
 
 // Executor defines the interface for executing tasks

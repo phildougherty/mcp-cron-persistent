@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jolks/mcp-cron/internal/model"
+	"mcp-cron-persistent/internal/model"
 )
 
 // CommandExecutor handles executing commands

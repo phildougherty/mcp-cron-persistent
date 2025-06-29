@@ -4,13 +4,14 @@ package scheduler
 import (
 	"context"
 	"fmt"
+	"mcp-cron-persistent/internal/config"
+	"mcp-cron-persistent/internal/errors"
+	"mcp-cron-persistent/internal/logging"
+	"mcp-cron-persistent/internal/model"
+	"mcp-cron-persistent/internal/observability"
 	"sync"
 	"time"
 
-	"github.com/jolks/mcp-cron/internal/config"
-	"github.com/jolks/mcp-cron/internal/errors"
-	"github.com/jolks/mcp-cron/internal/logging"
-	"github.com/jolks/mcp-cron/internal/model"
 	"github.com/robfig/cron/v3"
 )
 
@@ -24,7 +25,21 @@ type Storage interface {
 	Close() error
 }
 
-// Scheduler manages cron tasks
+// HolidayProvider interface for holiday checking
+type HolidayProvider interface {
+	IsHoliday(date time.Time, timezone string) (bool, string, error)
+	GetHolidaysInRange(start, end time.Time, timezone string) ([]Holiday, error)
+}
+
+// Holiday represents a holiday
+type Holiday struct {
+	Name     string    `json:"name"`
+	Date     time.Time `json:"date"`
+	Type     string    `json:"type"` // "national", "regional", "company"
+	Timezone string    `json:"timezone"`
+}
+
+// Scheduler manages cron tasks with enhanced scheduling features
 type Scheduler struct {
 	cron              *cron.Cron
 	tasks             map[string]*model.Task
@@ -35,6 +50,13 @@ type Scheduler struct {
 	storage           Storage
 	dependencyManager *DependencyManager
 	watcherManager    *WatcherManager
+
+	// Enhanced features
+	holidayProvider    HolidayProvider
+	maintenanceWindows map[string]*model.MaintenanceWindow
+	timeWindows        map[string]*model.TimeWindow
+	timezoneCache      map[string]*time.Location
+	metricsCollector   *observability.MetricsCollector
 }
 
 // NewScheduler creates a new scheduler instance
@@ -52,27 +74,182 @@ func NewScheduler(cfg *config.SchedulerConfig) *Scheduler {
 		tasks:    make(map[string]*model.Task),
 		entryIDs: make(map[string]cron.EntryID),
 		config:   cfg,
+
+		// Enhanced features
+		maintenanceWindows: make(map[string]*model.MaintenanceWindow),
+		timeWindows:        make(map[string]*model.TimeWindow),
+		timezoneCache:      make(map[string]*time.Location),
 	}
 
-	// Initialize new managers
+	// Initialize managers
 	scheduler.dependencyManager = NewDependencyManager(scheduler)
 	scheduler.watcherManager = NewWatcherManager(scheduler, logging.GetDefaultLogger())
 
 	return scheduler
 }
 
+// SetMetricsCollector sets the metrics collector
+func (s *Scheduler) SetMetricsCollector(collector *observability.MetricsCollector) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.metricsCollector = collector
+}
+
+// SetHolidayProvider sets the holiday provider
+func (s *Scheduler) SetHolidayProvider(provider HolidayProvider) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.holidayProvider = provider
+}
+
+// AddMaintenanceWindow adds a maintenance window
+func (s *Scheduler) AddMaintenanceWindow(window *model.MaintenanceWindow) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if window.ID == "" {
+		window.ID = fmt.Sprintf("maint_%d", time.Now().UnixNano())
+	}
+
+	// Validate timezone
+	if _, err := s.getLocation(window.Timezone); err != nil {
+		return errors.InvalidInput(fmt.Sprintf("invalid timezone: %s", window.Timezone))
+	}
+
+	s.maintenanceWindows[window.ID] = window
+	return nil
+}
+
+// AddTimeWindow adds a time window constraint
+func (s *Scheduler) AddTimeWindow(id string, window *model.TimeWindow) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Validate timezone
+	if _, err := s.getLocation(window.Timezone); err != nil {
+		return errors.InvalidInput(fmt.Sprintf("invalid timezone: %s", window.Timezone))
+	}
+
+	// Validate time format
+	if _, err := time.Parse("15:04", window.Start); err != nil {
+		return errors.InvalidInput(fmt.Sprintf("invalid start time format: %s", window.Start))
+	}
+	if _, err := time.Parse("15:04", window.End); err != nil {
+		return errors.InvalidInput(fmt.Sprintf("invalid end time format: %s", window.End))
+	}
+
+	s.timeWindows[id] = window
+	return nil
+}
+
+// getLocation returns timezone location with caching
+func (s *Scheduler) getLocation(timezone string) (*time.Location, error) {
+	if timezone == "" {
+		timezone = "UTC"
+	}
+
+	if loc, exists := s.timezoneCache[timezone]; exists {
+		return loc, nil
+	}
+
+	loc, err := time.LoadLocation(timezone)
+	if err != nil {
+		return nil, err
+	}
+
+	s.timezoneCache[timezone] = loc
+	return loc, nil
+}
+
+// ShouldSkipExecution checks if task execution should be skipped
+func (s *Scheduler) ShouldSkipExecution(task *model.Task, execTime time.Time) (bool, string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	taskTimezone := task.Timezone
+	if taskTimezone == "" {
+		taskTimezone = "UTC"
+	}
+
+	loc, err := s.getLocation(taskTimezone)
+	if err != nil {
+		return true, fmt.Sprintf("invalid timezone: %s", taskTimezone), err
+	}
+
+	localTime := execTime.In(loc)
+
+	// Check maintenance windows
+	for _, window := range s.maintenanceWindows {
+		if !window.Enabled {
+			continue
+		}
+
+		windowLoc, err := s.getLocation(window.Timezone)
+		if err != nil {
+			continue
+		}
+
+		windowStart := window.Start.In(windowLoc)
+		windowEnd := window.End.In(windowLoc)
+
+		if localTime.After(windowStart) && localTime.Before(windowEnd) {
+			return true, fmt.Sprintf("maintenance window: %s", window.Name), nil
+		}
+	}
+
+	// Check time windows
+	if task.TimeWindowID != "" {
+		if window, exists := s.timeWindows[task.TimeWindowID]; exists {
+			if !s.isWithinTimeWindow(localTime, window) {
+				return true, "outside allowed time window", nil
+			}
+		}
+	}
+
+	// Check holidays
+	if task.SkipHolidays && s.holidayProvider != nil {
+		isHoliday, holidayName, err := s.holidayProvider.IsHoliday(localTime, taskTimezone)
+		if err != nil {
+			return false, "", err
+		}
+		if isHoliday {
+			return true, fmt.Sprintf("holiday: %s", holidayName), nil
+		}
+	}
+
+	return false, "", nil
+}
+
+// isWithinTimeWindow checks if time is within allowed window
+func (s *Scheduler) isWithinTimeWindow(t time.Time, window *model.TimeWindow) bool {
+	// Check day of week
+	if len(window.Days) > 0 {
+		dayMatch := false
+		for _, day := range window.Days {
+			if int(t.Weekday()) == day {
+				dayMatch = true
+				break
+			}
+		}
+		if !dayMatch {
+			return false
+		}
+	}
+
+	// Check time range
+	timeStr := t.Format("15:04")
+	return timeStr >= window.Start && timeStr <= window.End
+}
+
 // SetStorage sets the storage backend for persistence
 func (s *Scheduler) SetStorage(storage Storage) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
 	s.storage = storage
-
 	// Load existing tasks from storage
 	if storage != nil {
 		return s.loadTasksFromStorage()
 	}
-
 	return nil
 }
 
@@ -82,10 +259,8 @@ func (s *Scheduler) loadTasksFromStorage() error {
 	if err != nil {
 		return fmt.Errorf("failed to load tasks from storage: %w", err)
 	}
-
 	for _, task := range tasks {
 		s.tasks[task.ID] = task
-
 		// Schedule enabled tasks
 		if task.Enabled && s.taskExecutor != nil {
 			if scheduleErr := s.scheduleTask(task); scheduleErr != nil {
@@ -96,7 +271,6 @@ func (s *Scheduler) loadTasksFromStorage() error {
 			}
 		}
 	}
-
 	return nil
 }
 
@@ -112,7 +286,6 @@ func (s *Scheduler) saveTaskToStorage(task *model.Task) {
 // Start begins the scheduler
 func (s *Scheduler) Start(ctx context.Context) {
 	s.cron.Start()
-
 	// Listen for context cancellation to stop the scheduler
 	go func() {
 		<-ctx.Done()
@@ -147,7 +320,6 @@ func (s *Scheduler) RemoveTask(taskID string) error {
 
 	// Remove the task from our map
 	delete(s.tasks, taskID)
-
 	return nil
 }
 
@@ -155,12 +327,10 @@ func (s *Scheduler) RemoveTask(taskID string) error {
 func (s *Scheduler) GetTask(taskID string) (*model.Task, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-
 	task, exists := s.tasks[taskID]
 	if !exists {
 		return nil, errors.NotFound("task", taskID)
 	}
-
 	return task, nil
 }
 
@@ -168,12 +338,10 @@ func (s *Scheduler) GetTask(taskID string) (*model.Task, error) {
 func (s *Scheduler) ListTasks() []*model.Task {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-
 	tasks := make([]*model.Task, 0, len(s.tasks))
 	for _, task := range s.tasks {
 		tasks = append(tasks, task)
 	}
-
 	return tasks
 }
 
@@ -235,44 +403,9 @@ func (s *Scheduler) scheduleTask(task *model.Task) error {
 		return fmt.Errorf("cannot schedule task: no task executor set")
 	}
 
-	// Create the job function that will execute when scheduled
+	// Create the enhanced job function
 	jobFunc := func() {
-		task.LastRun = time.Now()
-		task.Status = model.StatusRunning
-		s.saveTaskToStorage(task)
-
-		// Execute the task
-		ctx := context.Background()
-		timeout := s.config.DefaultTimeout // Use the configured default timeout
-
-		// Create a result to track execution
-		result := &model.Result{
-			TaskID:    task.ID,
-			StartTime: time.Now(),
-		}
-
-		if err := s.taskExecutor.Execute(ctx, task, timeout); err != nil {
-			task.Status = model.StatusFailed
-			result.Error = err.Error()
-			result.ExitCode = 1
-		} else {
-			task.Status = model.StatusCompleted
-			result.ExitCode = 0
-		}
-
-		result.EndTime = time.Now()
-		result.Duration = result.EndTime.Sub(result.StartTime).String()
-
-		task.UpdatedAt = time.Now()
-		s.updateNextRunTime(task)
-		s.saveTaskToStorage(task)
-
-		// Save execution result if storage is available
-		if s.storage != nil {
-			if err := s.storage.SaveTaskResult(result); err != nil {
-				fmt.Printf("Failed to save task result: %v\n", err)
-			}
-		}
+		s.executeTaskWithObservability(task)
 	}
 
 	// Add the job to cron
@@ -284,8 +417,76 @@ func (s *Scheduler) scheduleTask(task *model.Task) error {
 	// Store the cron entry ID
 	s.entryIDs[task.ID] = entryID
 	s.updateNextRunTime(task)
-
 	return nil
+}
+
+// executeTaskWithObservability executes a task with enhanced observability and constraints
+func (s *Scheduler) executeTaskWithObservability(task *model.Task) {
+	startTime := time.Now()
+
+	// Check if execution should be skipped
+	skip, reason, err := s.ShouldSkipExecution(task, startTime)
+	if err != nil {
+		if s.metricsCollector != nil {
+			s.metricsCollector.RecordTaskExecution(task, time.Since(startTime), err)
+		}
+		return
+	}
+
+	if skip {
+		logging.GetDefaultLogger().WithField("task_id", task.ID).
+			Infof("Skipping task execution: %s", reason)
+		return
+	}
+
+	// Update task status
+	task.LastRun = startTime
+	task.Status = model.StatusRunning
+	s.saveTaskToStorage(task)
+
+	// Execute the task
+	ctx := context.Background()
+	timeout := s.config.DefaultTimeout
+	if task.MaxExecutionTime > 0 {
+		timeout = task.MaxExecutionTime
+	}
+
+	// Create a result to track execution
+	result := &model.Result{
+		TaskID:    task.ID,
+		StartTime: startTime,
+	}
+
+	var execErr error
+	if err := s.taskExecutor.Execute(ctx, task, timeout); err != nil {
+		task.Status = model.StatusFailed
+		result.Error = err.Error()
+		result.ExitCode = 1
+		execErr = err
+	} else {
+		task.Status = model.StatusCompleted
+		result.ExitCode = 0
+	}
+
+	result.EndTime = time.Now()
+	result.Duration = result.EndTime.Sub(result.StartTime).String()
+
+	task.UpdatedAt = time.Now()
+	s.updateNextRunTime(task)
+	s.saveTaskToStorage(task)
+
+	// Save execution result if storage is available
+	if s.storage != nil {
+		if err := s.storage.SaveTaskResult(result); err != nil {
+			fmt.Printf("Failed to save task result: %v\n", err)
+		}
+	}
+
+	// Update metrics
+	if s.metricsCollector != nil {
+		duration := time.Since(startTime)
+		s.metricsCollector.RecordTaskExecution(task, duration, execErr)
+	}
 }
 
 // updateNextRunTime updates the task's next run time based on its cron entry
@@ -301,7 +502,7 @@ func (s *Scheduler) updateNextRunTime(task *model.Task) {
 	}
 }
 
-// TriggerTask manually triggers a task (for dependencies and watchers)
+// triggerTask manually triggers a task (for dependencies and watchers)
 func (s *Scheduler) triggerTask(task *model.Task) {
 	// Check if task is enabled
 	if !task.Enabled {
@@ -429,7 +630,6 @@ func (s *Scheduler) Stop() error {
 	if s.watcherManager != nil {
 		s.watcherManager.Stop()
 	}
-
 	// Close storage if available
 	if s.storage != nil {
 		return s.storage.Close()
@@ -472,6 +672,9 @@ func (s *Scheduler) executeTaskNow(task *model.Task) {
 
 	ctx := context.Background()
 	timeout := s.config.DefaultTimeout
+	if task.MaxExecutionTime > 0 {
+		timeout = task.MaxExecutionTime
+	}
 
 	// Execute the task
 	if err := s.taskExecutor.Execute(ctx, task, timeout); err != nil {

@@ -4,11 +4,11 @@ package main
 import (
 	"testing"
 
-	"github.com/jolks/mcp-cron/internal/agent"
-	"github.com/jolks/mcp-cron/internal/command"
-	"github.com/jolks/mcp-cron/internal/config"
-	"github.com/jolks/mcp-cron/internal/scheduler"
-	"github.com/jolks/mcp-cron/internal/server"
+	"mcp-cron-persistent/internal/agent"
+	"mcp-cron-persistent/internal/command"
+	"mcp-cron-persistent/internal/config"
+	"mcp-cron-persistent/internal/scheduler"
+	"mcp-cron-persistent/internal/server"
 )
 
 // TestMCPServerCreation tests server creation with custom configs
