@@ -135,6 +135,45 @@ func (s *MCPServer) registerToolsDeclarative() {
 			Handler:     s.handleTriggerDependencyChain,
 			Parameters:  TaskIDParams{},
 		},
+		// Add these observability tools:
+		{
+			Name:        "get_metrics",
+			Description: "Get comprehensive metrics about task execution and system performance",
+			Handler:     s.handleGetMetrics,
+			Parameters:  MetricsParams{},
+		},
+		{
+			Name:        "health_check",
+			Description: "Perform health checks and return system status",
+			Handler:     s.handleHealthCheck,
+			Parameters:  HealthCheckParams{},
+		},
+		{
+			Name:        "get_system_metrics",
+			Description: "Get detailed system performance metrics",
+			Handler:     s.handleGetSystemMetrics,
+			Parameters:  struct{}{}, // No parameters needed
+		},
+
+		// Add maintenance window tools:
+		{
+			Name:        "add_maintenance_window",
+			Description: "Add a maintenance window during which tasks will be skipped",
+			Handler:     s.handleAddMaintenanceWindow,
+			Parameters:  MaintenanceWindowParams{},
+		},
+		{
+			Name:        "add_time_window",
+			Description: "Add a time window constraint for task execution",
+			Handler:     s.handleAddTimeWindow,
+			Parameters:  TimeWindowParams{},
+		},
+		{
+			Name:        "list_holidays",
+			Description: "List holidays for a specific date range and timezone",
+			Handler:     s.handleListHolidays,
+			Parameters:  HolidayQueryParams{},
+		},
 	}
 
 	// Register all the tools

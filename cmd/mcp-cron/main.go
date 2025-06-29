@@ -176,11 +176,15 @@ func createApp(cfg *config.Config) (*Application, error) {
 		if err != nil {
 			return nil, err
 		}
-		// Set storage for the scheduler (this will load tasks from DB and schedule them)
+
+		// Set storage for the scheduler
 		if err := sched.SetStorage(sqliteStorage); err != nil {
 			sqliteStorage.Close()
 			return nil, err
 		}
+
+		// Also set storage reference in MCP server
+		mcpServer.SetStorage(sqliteStorage)
 	}
 
 	// Get the default logger that was configured by the server

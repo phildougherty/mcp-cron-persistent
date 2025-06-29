@@ -13,20 +13,14 @@ import (
 	"time"
 
 	"mcp-cron-persistent/internal/agent"
-	"mcp-cron-persistent/internal/observability"
-	"mcp-cron-persistent/internal/utils"
-
-	"mcp-cron-persistent/internal/scheduler"
-
-	"mcp-cron-persistent/internal/model"
-
-	"mcp-cron-persistent/internal/logging"
-
-	"mcp-cron-persistent/internal/errors"
-
-	"mcp-cron-persistent/internal/config"
-
 	"mcp-cron-persistent/internal/command"
+	"mcp-cron-persistent/internal/config"
+	"mcp-cron-persistent/internal/errors"
+	"mcp-cron-persistent/internal/logging"
+	"mcp-cron-persistent/internal/model"
+	"mcp-cron-persistent/internal/observability"
+	"mcp-cron-persistent/internal/scheduler"
+	"mcp-cron-persistent/internal/utils"
 
 	"github.com/ThinkInAIXYZ/go-mcp/protocol"
 	"github.com/ThinkInAIXYZ/go-mcp/server"
@@ -164,17 +158,25 @@ func NewMCPServer(cfg *config.Config, scheduler *scheduler.Scheduler, cmdExecuto
 		}
 	}
 
+	// Create metrics collector
+	metricsCollector := observability.NewMetricsCollector(logger)
+
 	// Create MCP Server
 	mcpServer := &MCPServer{
-		scheduler:     scheduler,
-		cmdExecutor:   cmdExecutor,
-		agentExecutor: agentExecutor,
-		address:       cfg.Server.Address,
-		port:          cfg.Server.Port,
-		stopCh:        make(chan struct{}),
-		config:        cfg,
-		logger:        logger,
+		scheduler:        scheduler,
+		cmdExecutor:      cmdExecutor,
+		agentExecutor:    agentExecutor,
+		address:          cfg.Server.Address,
+		port:             cfg.Server.Port,
+		stopCh:           make(chan struct{}),
+		config:           cfg,
+		logger:           logger,
+		metricsCollector: metricsCollector, // Add this
+		// storage will be set when scheduler.SetStorage is called
 	}
+
+	// Set up scheduler with metrics collector
+	scheduler.SetMetricsCollector(metricsCollector)
 
 	// NOTE: Do NOT set task executor here - it will be set in main.go
 	// This prevents the circular dependency issue
@@ -239,6 +241,11 @@ func (s *MCPServer) Start(ctx context.Context) error {
 	}()
 
 	return nil
+}
+
+// SetStorage sets the storage reference (called when scheduler storage is set)
+func (s *MCPServer) SetStorage(storage scheduler.Storage) {
+	s.storage = storage
 }
 
 // handleRunTask triggers a task to run immediately
@@ -790,4 +797,101 @@ func parseLogLevel(level string) logging.LogLevel {
 	default:
 		return logging.Info
 	}
+}
+
+// Add these handlers to a new file or existing server files:
+
+func (s *MCPServer) handleAddMaintenanceWindow(request *protocol.CallToolRequest) (*protocol.CallToolResult, error) {
+	var params MaintenanceWindowParams
+	if err := extractParams(request, &params); err != nil {
+		return createErrorResponse(err)
+	}
+
+	// Parse times
+	start, err := time.Parse(time.RFC3339, params.Start)
+	if err != nil {
+		return createErrorResponse(errors.InvalidInput(fmt.Sprintf("invalid start time: %s", err.Error())))
+	}
+
+	end, err := time.Parse(time.RFC3339, params.End)
+	if err != nil {
+		return createErrorResponse(errors.InvalidInput(fmt.Sprintf("invalid end time: %s", err.Error())))
+	}
+
+	window := &model.MaintenanceWindow{
+		Name:        params.Name,
+		Start:       start,
+		End:         end,
+		Timezone:    params.Timezone,
+		Description: params.Description,
+		Enabled:     params.Enabled,
+	}
+
+	if err := s.scheduler.AddMaintenanceWindow(window); err != nil {
+		return createErrorResponse(err)
+	}
+
+	return createSuccessResponse(fmt.Sprintf("Maintenance window '%s' added successfully", params.Name))
+}
+
+func (s *MCPServer) handleAddTimeWindow(request *protocol.CallToolRequest) (*protocol.CallToolResult, error) {
+	var params TimeWindowParams
+	if err := extractParams(request, &params); err != nil {
+		return createErrorResponse(err)
+	}
+
+	window := &model.TimeWindow{
+		Start:    params.Start,
+		End:      params.End,
+		Timezone: params.Timezone,
+		Days:     params.Days,
+	}
+
+	if err := s.scheduler.AddTimeWindow(params.ID, window); err != nil {
+		return createErrorResponse(err)
+	}
+
+	return createSuccessResponse(fmt.Sprintf("Time window '%s' added successfully", params.ID))
+}
+
+func (s *MCPServer) handleListHolidays(request *protocol.CallToolRequest) (*protocol.CallToolResult, error) {
+	var params HolidayQueryParams
+	if err := extractParams(request, &params); err != nil {
+		return createErrorResponse(err)
+	}
+
+	// This is a placeholder - you'd implement actual holiday lookup
+	response := map[string]interface{}{
+		"holidays": []map[string]string{
+			{
+				"name": "New Year's Day",
+				"date": params.StartDate[:4] + "-01-01",
+				"type": "national",
+			},
+			{
+				"name": "Christmas Day",
+				"date": params.StartDate[:4] + "-12-25",
+				"type": "national",
+			},
+		},
+		"timezone": params.Timezone,
+		"period": map[string]string{
+			"start": params.StartDate,
+			"end":   params.EndDate,
+		},
+	}
+
+	responseJSON, err := json.Marshal(response)
+	if err != nil {
+		return createErrorResponse(errors.Internal(err))
+	}
+
+	return &protocol.CallToolResult{
+		Content: []protocol.Content{
+			protocol.TextContent{
+				Type: "text",
+				Text: string(responseJSON),
+			},
+		},
+	}, nil
 }

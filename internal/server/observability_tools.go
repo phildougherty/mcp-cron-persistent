@@ -17,6 +17,29 @@ type MetricsParams struct {
 	Since  string `json:"since,omitempty" description:"show metrics since date (YYYY-MM-DD)"`
 }
 
+type MaintenanceWindowParams struct {
+	Name        string `json:"name" description:"name for the maintenance window"`
+	Start       string `json:"start" description:"start time (RFC3339 format)"`
+	End         string `json:"end" description:"end time (RFC3339 format)"`
+	Timezone    string `json:"timezone" description:"IANA timezone"`
+	Description string `json:"description,omitempty" description:"description of maintenance"`
+	Enabled     bool   `json:"enabled" description:"whether window is enabled"`
+}
+
+type TimeWindowParams struct {
+	ID       string `json:"id" description:"unique ID for the time window"`
+	Start    string `json:"start" description:"start time in HH:MM format"`
+	End      string `json:"end" description:"end time in HH:MM format"`
+	Timezone string `json:"timezone" description:"IANA timezone"`
+	Days     []int  `json:"days" description:"allowed days (0=Sunday, 1=Monday, etc.)"`
+}
+
+type HolidayQueryParams struct {
+	StartDate string `json:"startDate" description:"start date (YYYY-MM-DD)"`
+	EndDate   string `json:"endDate" description:"end date (YYYY-MM-DD)"`
+	Timezone  string `json:"timezone" description:"IANA timezone"`
+}
+
 // HealthCheckParams holds parameters for health checks
 type HealthCheckParams struct {
 	Component string `json:"component,omitempty" description:"specific component to check (scheduler, storage, system)"`
