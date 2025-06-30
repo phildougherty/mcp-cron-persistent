@@ -164,132 +164,33 @@ func (s *MCPServer) registerToolsDeclarative() {
 	}
 }
 
-// registerToolWithError registers a tool with error handling
 func registerToolWithError(srv *server.Server, def ToolDefinition) {
 	fmt.Printf("[DEBUG] Attempting to register tool: %s\n", def.Name)
 	fmt.Printf("[DEBUG] Parameter type: %T\n", def.Parameters)
 
-	// Convert Go struct types to JSON schema format that protocol.NewTool expects
-	var jsonSchema interface{}
-
-	// Convert the parameter struct to JSON schema
-	switch p := def.Parameters.(type) {
-	case struct{}:
-		fmt.Printf("[DEBUG] Handling struct{} for tool: %s\n", def.Name)
-		// Empty struct - no parameters
-		jsonSchema = map[string]interface{}{
-			"type":       "object",
-			"properties": map[string]interface{}{},
-		}
-	case TaskIDParams:
-		fmt.Printf("[DEBUG] Handling TaskIDParams for tool: %s\n", def.Name)
-		jsonSchema = map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"id": map[string]interface{}{
-					"type":        "string",
-					"description": "the ID of the task",
-				},
-			},
-			"required": []string{"id"},
-		}
-	case TaskParams:
-		fmt.Printf("[DEBUG] Handling TaskParams for tool: %s\n", def.Name)
-		jsonSchema = map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"id":          map[string]interface{}{"type": "string", "description": "task ID"},
-				"name":        map[string]interface{}{"type": "string", "description": "task name"},
-				"schedule":    map[string]interface{}{"type": "string", "description": "cron schedule expression"},
-				"type":        map[string]interface{}{"type": "string", "description": "task type"},
-				"command":     map[string]interface{}{"type": "string", "description": "command to execute"},
-				"description": map[string]interface{}{"type": "string", "description": "task description"},
-				"enabled":     map[string]interface{}{"type": "boolean", "description": "whether the task is enabled"},
-			},
-		}
-	case AITaskParams:
-		fmt.Printf("[DEBUG] Handling AITaskParams for tool: %s\n", def.Name)
-		jsonSchema = map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"id":           map[string]interface{}{"type": "string", "description": "task ID"},
-				"name":         map[string]interface{}{"type": "string", "description": "task name"},
-				"schedule":     map[string]interface{}{"type": "string", "description": "cron schedule expression"},
-				"type":         map[string]interface{}{"type": "string", "description": "task type"},
-				"command":      map[string]interface{}{"type": "string", "description": "command to execute"},
-				"description":  map[string]interface{}{"type": "string", "description": "task description"},
-				"enabled":      map[string]interface{}{"type": "boolean", "description": "whether the task is enabled"},
-				"prompt":       map[string]interface{}{"type": "string", "description": "prompt to use for AI"},
-				"model":        map[string]interface{}{"type": "string", "description": "specific model to use"},
-				"modelHint":    map[string]interface{}{"type": "string", "description": "hint for model selection"},
-				"requireLocal": map[string]interface{}{"type": "boolean", "description": "require local model execution"},
-				"maxCost":      map[string]interface{}{"type": "number", "description": "maximum cost per execution"},
-			},
-		}
-	case RunTaskParams:
-		fmt.Printf("[DEBUG] Handling RunTaskParams for tool: %s\n", def.Name)
-		jsonSchema = map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"id":      map[string]interface{}{"type": "string", "description": "the ID of the task to run"},
-				"timeout": map[string]interface{}{"type": "string", "description": "optional timeout duration"},
-			},
-			"required": []string{"id"},
-		}
-	case AgentParams:
-		fmt.Printf("[DEBUG] Handling AgentParams for tool: %s\n", def.Name)
-		jsonSchema = map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"name":        map[string]interface{}{"type": "string", "description": "agent name"},
-				"schedule":    map[string]interface{}{"type": "string", "description": "cron schedule expression"},
-				"prompt":      map[string]interface{}{"type": "string", "description": "main task/goal for the agent"},
-				"personality": map[string]interface{}{"type": "string", "description": "agent personality and role"},
-				"description": map[string]interface{}{"type": "string", "description": "agent description"},
-				"context":     map[string]interface{}{"type": "string", "description": "additional context"},
-				"enabled":     map[string]interface{}{"type": "boolean", "description": "whether the agent is enabled"},
-			},
-			"required": []string{"name", "schedule", "prompt", "personality"},
-		}
-	case SpawnAgentParams:
-		fmt.Printf("[DEBUG] Handling SpawnAgentParams for tool: %s\n", def.Name)
-		jsonSchema = map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"description": map[string]interface{}{"type": "string", "description": "natural language description of the agent to create"},
-			},
-			"required": []string{"description"},
-		}
-	default:
-		fmt.Printf("[DEBUG] Falling through to default case for tool: %s\n", def.Name)
-		fmt.Printf("[DEBUG] Unhandled parameter type: %T\n", p)
-		fmt.Printf("[DEBUG] Parameter value: %+v\n", p)
-
-		// Just use empty object for now to avoid the panic
-		jsonSchema = map[string]interface{}{
-			"type":       "object",
-			"properties": map[string]interface{}{},
-		}
-	}
-
-	fmt.Printf("[DEBUG] About to call protocol.NewTool for: %s\n", def.Name)
-	tool, err := protocol.NewTool(def.Name, def.Description, jsonSchema)
+	// The go-mcp library expects the actual Go struct, not a JSON schema map
+	// Let's try passing the struct directly first
+	tool, err := protocol.NewTool(def.Name, def.Description, def.Parameters)
 	if err != nil {
-		fmt.Printf("[ERROR] protocol.NewTool failed for %s: %v\n", def.Name, err)
-		panic(fmt.Errorf("failed to register tool '%s': %w", def.Name, err))
+		fmt.Printf("[ERROR] Direct struct failed for %s: %v\n", def.Name, err)
+
+		// If that fails, try with nil for empty structs
+		var params interface{}
+		switch def.Parameters.(type) {
+		case struct{}:
+			params = nil // Use nil instead of empty struct
+		default:
+			params = def.Parameters
+		}
+
+		tool, err = protocol.NewTool(def.Name, def.Description, params)
+		if err != nil {
+			fmt.Printf("[ERROR] Alternative approach failed for %s: %v\n", def.Name, err)
+			panic(fmt.Errorf("failed to register tool '%s': %w", def.Name, err))
+		}
 	}
 
 	fmt.Printf("[DEBUG] protocol.NewTool succeeded for: %s\n", def.Name)
 	srv.RegisterTool(tool, def.Handler)
 	fmt.Printf("[DEBUG] Successfully registered tool: %s\n", def.Name)
-}
-
-// buildSchemaFromStruct builds a JSON schema from a struct using reflection
-func buildSchemaFromStruct(v interface{}) interface{} {
-	// This is a fallback for any parameter types we haven't explicitly handled
-	return map[string]interface{}{
-		"type":        "object",
-		"properties":  map[string]interface{}{},
-		"description": "Dynamic schema for " + fmt.Sprintf("%T", v),
-	}
 }
