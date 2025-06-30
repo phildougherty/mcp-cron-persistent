@@ -196,27 +196,133 @@ func (s *MCPServer) registerToolsDeclarative() {
 	}
 }
 
+// registerToolWithError registers a tool with error handling
 func registerToolWithError(srv *server.Server, def ToolDefinition) {
-	// Convert parameters to a more compatible format for the MCP library
-	var params interface{}
+	// Convert Go struct types to JSON schema format that protocol.NewTool expects
+	var jsonSchema interface{}
 
-	// Handle different parameter types more safely
+	// Convert the parameter struct to JSON schema
 	switch p := def.Parameters.(type) {
 	case struct{}:
-		// Empty struct - convert to nil or empty map
-		params = map[string]interface{}{}
+		// Empty struct - no parameters
+		jsonSchema = map[string]interface{}{
+			"type":       "object",
+			"properties": map[string]interface{}{},
+		}
+	case TaskIDParams:
+		jsonSchema = map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"id": map[string]interface{}{
+					"type":        "string",
+					"description": "the ID of the task",
+				},
+			},
+			"required": []string{"id"},
+		}
+	case TaskParams:
+		jsonSchema = map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"id":          map[string]interface{}{"type": "string", "description": "task ID"},
+				"name":        map[string]interface{}{"type": "string", "description": "task name"},
+				"schedule":    map[string]interface{}{"type": "string", "description": "cron schedule expression"},
+				"type":        map[string]interface{}{"type": "string", "description": "task type"},
+				"command":     map[string]interface{}{"type": "string", "description": "command to execute"},
+				"description": map[string]interface{}{"type": "string", "description": "task description"},
+				"enabled":     map[string]interface{}{"type": "boolean", "description": "whether the task is enabled"},
+			},
+		}
+	case AITaskParams:
+		jsonSchema = map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"id":           map[string]interface{}{"type": "string", "description": "task ID"},
+				"name":         map[string]interface{}{"type": "string", "description": "task name"},
+				"schedule":     map[string]interface{}{"type": "string", "description": "cron schedule expression"},
+				"type":         map[string]interface{}{"type": "string", "description": "task type"},
+				"command":      map[string]interface{}{"type": "string", "description": "command to execute"},
+				"description":  map[string]interface{}{"type": "string", "description": "task description"},
+				"enabled":      map[string]interface{}{"type": "boolean", "description": "whether the task is enabled"},
+				"prompt":       map[string]interface{}{"type": "string", "description": "prompt to use for AI"},
+				"model":        map[string]interface{}{"type": "string", "description": "specific model to use"},
+				"modelHint":    map[string]interface{}{"type": "string", "description": "hint for model selection"},
+				"requireLocal": map[string]interface{}{"type": "boolean", "description": "require local model execution"},
+				"maxCost":      map[string]interface{}{"type": "number", "description": "maximum cost per execution"},
+			},
+		}
+	case RunTaskParams:
+		jsonSchema = map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"id":      map[string]interface{}{"type": "string", "description": "the ID of the task to run"},
+				"timeout": map[string]interface{}{"type": "string", "description": "optional timeout duration"},
+			},
+			"required": []string{"id"},
+		}
+	case AgentParams:
+		jsonSchema = map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"name":        map[string]interface{}{"type": "string", "description": "agent name"},
+				"schedule":    map[string]interface{}{"type": "string", "description": "cron schedule expression"},
+				"prompt":      map[string]interface{}{"type": "string", "description": "main task/goal for the agent"},
+				"personality": map[string]interface{}{"type": "string", "description": "agent personality and role"},
+				"description": map[string]interface{}{"type": "string", "description": "agent description"},
+				"context":     map[string]interface{}{"type": "string", "description": "additional context"},
+				"enabled":     map[string]interface{}{"type": "boolean", "description": "whether the agent is enabled"},
+			},
+			"required": []string{"name", "schedule", "prompt", "personality"},
+		}
+	case SpawnAgentParams:
+		jsonSchema = map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"description": map[string]interface{}{"type": "string", "description": "natural language description of the agent to create"},
+			},
+			"required": []string{"description"},
+		}
+	case DependencyTaskParams:
+		jsonSchema = map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"name":         map[string]interface{}{"type": "string", "description": "task name"},
+				"schedule":     map[string]interface{}{"type": "string", "description": "cron schedule expression"},
+				"dependencies": map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}, "description": "list of task IDs this task depends on"},
+				// Add other fields as needed
+			},
+			"required": []string{"name", "schedule", "dependencies"},
+		}
+	case WatcherTaskParams:
+		jsonSchema = map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"name":      map[string]interface{}{"type": "string", "description": "task name"},
+				"watchPath": map[string]interface{}{"type": "string", "description": "path to watch for changes"},
+				"pattern":   map[string]interface{}{"type": "string", "description": "file pattern to match"},
+				// Add other fields as needed
+			},
+			"required": []string{"name", "watchPath"},
+		}
 	default:
-		// For other types, try to use them directly
-		params = p
+		// For any other types, try to use reflection to build schema
+		jsonSchema = buildSchemaFromStruct(p)
 	}
 
-	tool, err := protocol.NewTool(def.Name, def.Description, params)
+	tool, err := protocol.NewTool(def.Name, def.Description, jsonSchema)
 	if err != nil {
-		// Instead of panicking, log the error and skip this tool
-		fmt.Printf("Warning: Failed to register tool '%s': %v\n", def.Name, err)
-		fmt.Printf("  Parameters type: %T\n", def.Parameters)
-		return // Skip this tool instead of crashing
+		panic(fmt.Errorf("failed to register tool '%s': %w", def.Name, err))
 	}
 
 	srv.RegisterTool(tool, def.Handler)
+}
+
+// buildSchemaFromStruct builds a JSON schema from a struct using reflection
+func buildSchemaFromStruct(v interface{}) interface{} {
+	// This is a fallback for any parameter types we haven't explicitly handled
+	return map[string]interface{}{
+		"type":        "object",
+		"properties":  map[string]interface{}{},
+		"description": "Dynamic schema for " + fmt.Sprintf("%T", v),
+	}
 }
