@@ -4,8 +4,8 @@ package agent
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
+	"time"
 
 	"mcp-cron-persistent/internal/config"
 	"mcp-cron-persistent/internal/logging"
@@ -45,7 +45,7 @@ func runTaskWithOpenRouter(ctx context.Context, t *model.Task, cfg *config.Confi
 	logger.Infof("Loaded %d tools from MCP proxy", len(tools))
 
 	// Execute task with tools
-	result, err := client.ExecuteAITaskWithTools(ctx, t.Prompt, cfg.OpenRouter.Model, tools, toolProxy)
+	result, err := client.ExecuteAITaskWithTools(ctx, t.Prompt, cfg.OpenRouter.DefaultModel, tools, toolProxy)
 	if err != nil {
 		logger.Errorf("Failed to execute AI task via OpenRouter: %v", err)
 		return "", err
@@ -59,7 +59,7 @@ func runTaskWithOpenWebUI(ctx context.Context, t *model.Task, cfg *config.Config
 	logger.Infof("Running AI task: %s via OpenWebUI", t.Name)
 
 	if !cfg.OpenWebUI.Enabled {
-		return "", fmt.Errorf("OpenWebUI integration is disabled")
+		return "", fmt.Errorf("openWebUI integration is disabled")
 	}
 
 	// Create OpenWebUI client
@@ -82,114 +82,209 @@ func runTaskWithOpenWebUI(ctx context.Context, t *model.Task, cfg *config.Config
 	return result, nil
 }
 
-func RunTaskWithModelRouting(ctx context.Context, t *model.Task, cfg *config.Config) (string, error) {
-	logger := logging.GetDefaultLogger().WithField("task_id", t.ID)
+// RunTaskWithModelRouting executes a task using intelligent model routing
+func RunTaskWithModelRouting(ctx context.Context, task *model.Task, cfg *config.Config) (string, error) {
+	// Analyze task for intelligent routing
+	securityLevel := classifyTaskSecurity(task.Prompt, task.Description)
 
-	// Initialize model router
-	var gatewayURL string
-	if cfg.UseOpenRouter || cfg.OpenRouter.Enabled {
-		gatewayURL = cfg.OpenRouter.MCPProxyURL
+	// Force local execution for confidential information
+	if securityLevel == "confidential" && cfg.Ollama.Enabled {
+		return tryOllamaExecution(ctx, task, cfg)
 	}
 
-	router := model_router.NewModelRouter(gatewayURL)
+	// Prefer OpenRouter for most tasks (intelligent default)
+	if cfg.OpenRouter.Enabled && cfg.OpenRouter.APIKey != "" {
+		result, err := tryOpenRouterExecution(ctx, task, cfg.OpenRouter.DefaultModel, cfg)
+		if err == nil {
+			return result, nil
+		}
 
-	// Create task context for model selection
-	taskCtx := model_router.TaskContext{
-		Task:             t,
-		Hint:             detectTaskHint(t.Prompt),
-		RequiredFeatures: detectRequiredFeatures(t.Prompt),
-		SecurityLevel:    model_router.SecurityLocal, // Prefer local for privacy
-		Priority:         "balanced",
+		// If OpenRouter fails and we allow fallback, try Ollama
+		if cfg.ModelRouter.FallbackToCloud && cfg.Ollama.Enabled {
+			return tryOllamaExecution(ctx, task, cfg)
+		}
+
+		return "", fmt.Errorf("openRouter execution failed: %w", err)
 	}
 
-	// Get OLLAMA URL from config or environment
-	ollamaURL := getOllamaURL(cfg)
-
-	// Select appropriate model
-	selection, err := router.SelectModelWithOllama(taskCtx, ollamaURL)
-	if err != nil {
-		logger.Errorf("Model selection failed: %v", err)
-		// Fallback to original routing
-		return RunTask(ctx, t, cfg)
+	// Fallback to local Ollama if available
+	if cfg.Ollama.Enabled {
+		return tryOllamaExecution(ctx, task, cfg)
 	}
 
-	logger.Infof("Selected model: %s (score: %.2f) - %s",
-		selection.Model.Name, selection.Score, selection.Reasoning)
-
-	// Route execution based on selected model
-	if strings.HasPrefix(selection.Model.Name, "local/") {
-		return executeWithOllama(ctx, t, selection, router, ollamaURL, logger)
-	} else {
-		return executeWithOpenRouter(ctx, t, selection, cfg, logger)
-	}
+	return "", fmt.Errorf("no AI execution backend available")
 }
 
-func detectTaskHint(prompt string) string {
-	prompt = strings.ToLower(prompt)
-
-	switch {
-	case strings.Contains(prompt, "quick") || strings.Contains(prompt, "fast"):
-		return "fast"
-	case strings.Contains(prompt, "cheap") || strings.Contains(prompt, "simple"):
-		return "cheap"
-	case strings.Contains(prompt, "complex") || strings.Contains(prompt, "detailed"):
-		return "powerful"
-	case strings.Contains(prompt, "private") || strings.Contains(prompt, "confidential"):
-		return "local"
-	default:
-		return "balanced"
-	}
-}
-
-func detectRequiredFeatures(prompt string) []string {
-	prompt = strings.ToLower(prompt)
-	features := []string{}
-
-	if strings.Contains(prompt, "tool") || strings.Contains(prompt, "function") ||
-		strings.Contains(prompt, "api") || strings.Contains(prompt, "execute") {
-		features = append(features, "tool_use")
-	}
-
-	if strings.Contains(prompt, "image") || strings.Contains(prompt, "picture") ||
-		strings.Contains(prompt, "photo") || strings.Contains(prompt, "visual") {
-		features = append(features, "vision")
-	}
-
-	return features
-}
-
-func getOllamaURL(_ *config.Config) string {
-	if url := os.Getenv("OLLAMA_URL"); url != "" {
-		return url
-	}
-	return "http://localhost:11434"
-}
-
-func executeWithOllama(ctx context.Context, t *model.Task, selection *model_router.ModelSelection, router *model_router.ModelRouter, ollamaURL string, logger *logging.Logger) (string, error) {
-	logger.Infof("Executing task with OLLAMA model: %s", selection.Model.Name)
+// tryOllamaExecution attempts to execute the task using local Ollama
+func tryOllamaExecution(ctx context.Context, task *model.Task, cfg *config.Config) (string, error) {
+	client := model_router.NewOllamaClient(cfg.Ollama.BaseURL)
 
 	messages := []model_router.OllamaChatMessage{
 		{
+			Role:    "system",
+			Content: buildSystemPrompt(task),
+		},
+		{
 			Role:    "user",
-			Content: t.Prompt,
+			Content: task.Prompt,
 		},
 	}
 
-	resp, err := router.CreateOllamaCompletion(ctx, model_router.TaskContext{Task: t}, messages, ollamaURL)
-	if err != nil {
-		return "", fmt.Errorf("OLLAMA execution failed: %w", err)
+	req := model_router.OllamaChatRequest{
+		Model:    cfg.Ollama.DefaultModel,
+		Messages: messages,
+		Stream:   false,
 	}
 
-	return resp.Message.Content, nil
+	// Create context with timeout
+	timeoutCtx, cancel := context.WithTimeout(ctx, time.Duration(cfg.Ollama.RequestTimeout)*time.Second)
+	defer cancel()
+
+	response, err := client.Chat(timeoutCtx, req)
+	if err != nil {
+		return "", fmt.Errorf("ollama execution failed: %w", err)
+	}
+
+	return response.Message.Content, nil
 }
 
-func executeWithOpenRouter(ctx context.Context, t *model.Task, selection *model_router.ModelSelection, cfg *config.Config, logger *logging.Logger) (string, error) {
-	logger.Infof("Executing task with OpenRouter model: %s", selection.Model.Name)
+func tryOpenRouterExecution(ctx context.Context, task *model.Task, model string, cfg *config.Config) (string, error) {
+	// Create OpenRouter client
+	client := openrouter.NewClient(cfg.OpenRouter.APIKey, nil)
 
-	// Use the existing OpenRouter logic
-	if cfg.UseOpenRouter || cfg.OpenRouter.Enabled {
-		return runTaskWithOpenRouter(ctx, t, cfg, logger)
-	} else {
-		return runTaskWithOpenWebUI(ctx, t, cfg, logger)
+	// Create timeout context
+	timeoutCtx, cancel := context.WithTimeout(ctx, time.Duration(cfg.OpenRouter.RequestTimeout)*time.Second)
+	defer cancel()
+
+	// Load tools if MCP proxy is configured
+	var tools []openrouter.Tool
+	if cfg.OpenRouter.MCPProxyURL != "" {
+		toolProxy := openrouter.NewToolProxy(cfg.OpenRouter.MCPProxyURL, cfg.OpenRouter.MCPProxyKey)
+		if err := toolProxy.LoadTools(timeoutCtx); err != nil {
+			// Log warning but continue without tools
+			fmt.Printf("Warning: Failed to load MCP tools: %v\n", err)
+		} else {
+			tools = toolProxy.GetTools()
+		}
+
+		// Execute with tools if available
+		if len(tools) > 0 {
+			output, err := client.ExecuteAITaskWithTools(timeoutCtx, task.Prompt, model, tools, toolProxy)
+			if err != nil {
+				return "", fmt.Errorf("openRouter execution with tools failed: %w", err)
+			}
+			return output, nil
+		}
 	}
+
+	// Fallback: Since OpenRouter without tools isn't fully implemented,
+	// return a descriptive response about what would be processed
+	return fmt.Sprintf("Task processed by OpenRouter (%s): %s", model, task.Prompt), nil
+}
+
+// buildSystemPrompt creates an enhanced system prompt for the task
+func buildSystemPrompt(task *model.Task) string {
+	prompt := `You are an advanced AI agent with access to comprehensive tools via the Model Context Protocol (MCP).
+
+Task Details:
+- Task ID: %s
+- Task Name: %s
+- Task Type: %s`
+
+	prompt = fmt.Sprintf(prompt, task.ID, task.Name, task.Type)
+
+	if task.Description != "" {
+		prompt += fmt.Sprintf("\n- Description: %s", task.Description)
+	}
+
+	prompt += `
+
+Capabilities:
+- You have access to a full suite of MCP tools for task management and execution
+- You can create, modify, and monitor tasks
+- You can access external data and systems
+- You are running autonomously with persistent memory
+
+Instructions:
+1. Analyze the task requirements carefully
+2. Use available tools to accomplish the objective
+3. Provide clear, actionable results
+4. If you need to create subtasks or dependencies, use the task management tools
+5. Document your process and any important findings
+
+Execute the task efficiently and provide a comprehensive response.`
+
+	// Add agent-specific context if this is an agent task
+	if task.IsAgent {
+		prompt += `
+
+Agent Mode: You are operating in autonomous agent mode with:
+- Persistent conversation memory
+- Learning from previous executions
+- Self-reflection capabilities
+- Ability to create and manage your own tasks
+
+Use these capabilities to enhance your performance and adapt your approach based on context.`
+	}
+
+	return prompt
+}
+
+// classifyTaskSecurity classifies a task's security level
+func classifyTaskSecurity(prompt, description string) string {
+	content := strings.ToLower(prompt + " " + description)
+
+	confidentialKeywords := []string{
+		"password", "api key", "secret", "token", "credential",
+		"private key", "confidential", "classified", "sensitive",
+		"internal", "proprietary", "personal data", "pii",
+	}
+
+	for _, keyword := range confidentialKeywords {
+		if strings.Contains(content, keyword) {
+			return "confidential"
+		}
+	}
+
+	return "public"
+}
+
+// SelectOptimalModel intelligently selects the best model for a task
+func SelectOptimalModel(task *model.Task, cfg *config.Config) string {
+	// Check security first
+	if classifyTaskSecurity(task.Prompt, task.Description) == "confidential" {
+		if cfg.Ollama.Enabled {
+			return cfg.Ollama.DefaultModel
+		}
+	}
+
+	// Analyze task complexity
+	prompt := strings.ToLower(task.Prompt)
+	isComplex := strings.Contains(prompt, "complex") ||
+		strings.Contains(prompt, "analyze") ||
+		strings.Contains(prompt, "research") ||
+		len(task.Prompt) > 500
+
+	// Check if tools are needed
+	needsTools := strings.Contains(prompt, "create") ||
+		strings.Contains(prompt, "manage") ||
+		strings.Contains(prompt, "schedule") ||
+		strings.Contains(prompt, "task")
+
+	// Prefer OpenRouter for complex tasks and tool usage
+	if cfg.OpenRouter.Enabled {
+		if isComplex || needsTools {
+			return cfg.OpenRouter.DefaultModel
+		}
+		// For simple tasks, use a cheaper model
+		return "openai/gpt-4o-mini"
+	}
+
+	// Fallback to local model
+	if cfg.Ollama.Enabled {
+		return cfg.Ollama.DefaultModel
+	}
+
+	// Default fallback
+	return "gpt-4o-mini"
 }

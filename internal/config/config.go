@@ -21,26 +21,12 @@ type Config struct {
 	// OpenWebUI integration configuration
 	OpenWebUI OpenWebUIConfig
 	// Database configuration
-	Database      DatabaseConfig
-	OpenRouter    OpenRouterConfig
+	Database    DatabaseConfig
+	OpenRouter  OpenRouterConfig
+	Ollama      OllamaConfig
+	ModelRouter ModelRouterConfig
+	// Legacy flag
 	UseOpenRouter bool
-	Ollama        OllamaConfig      `json:"ollama"`
-	ModelRouter   ModelRouterConfig `json:"modelRouter"`
-}
-
-type OllamaConfig struct {
-	Enabled bool   `json:"enabled"`
-	BaseURL string `json:"baseUrl"`
-}
-
-type ModelRouterConfig struct {
-	Enabled          bool    `json:"enabled"`
-	PreferLocal      bool    `json:"preferLocal"`
-	MaxCostPerTask   float64 `json:"maxCostPerTask"`
-	SpeedWeight      float64 `json:"speedWeight"`
-	CostWeight       float64 `json:"costWeight"`
-	CapabilityWeight float64 `json:"capabilityWeight"`
-	SecurityWeight   float64 `json:"securityWeight"`
 }
 
 // ServerConfig holds server-specific configuration
@@ -95,24 +81,45 @@ type DatabaseConfig struct {
 	Enabled bool
 }
 
-// OpenRouterConfig holds OpenRouter integration configuration
-type OpenRouterConfig struct {
-	APIKey      string
-	Model       string
-	MCPProxyURL string
-	MCPProxyKey string
-	Enabled     bool
+// OllamaConfig holds Ollama configuration
+type OllamaConfig struct {
+	BaseURL        string `json:"base_url"`
+	DefaultModel   string `json:"default_model"`
+	Enabled        bool   `json:"enabled"`
+	RequestTimeout int    `json:"request_timeout"`
 }
 
-// DefaultConfig returns the default configuration
+// OpenRouterConfig holds OpenRouter integration configuration
+type OpenRouterConfig struct {
+	APIKey         string `json:"api_key"`
+	DefaultModel   string `json:"default_model"`
+	MCPProxyURL    string `json:"mcp_proxy_url"`
+	MCPProxyKey    string `json:"mcp_proxy_key"`
+	RequestTimeout int    `json:"request_timeout"`
+	Enabled        bool   `json:"enabled"`
+}
+
+// ModelRouterConfig holds model router configuration
+type ModelRouterConfig struct {
+	Enabled          bool    `json:"enabled"`
+	PreferLocal      bool    `json:"prefer_local"`
+	FallbackToCloud  bool    `json:"fallback_to_cloud"`
+	DefaultHint      string  `json:"default_hint"` // fast, cheap, powerful, local, balanced
+	MaxCostPerTask   float64 `json:"max_cost_per_task"`
+	SpeedWeight      float64 `json:"speed_weight"`
+	CostWeight       float64 `json:"cost_weight"`
+	CapabilityWeight float64 `json:"capability_weight"`
+	SecurityWeight   float64 `json:"security_weight"`
+}
+
 func DefaultConfig() *Config {
 	return &Config{
 		Server: ServerConfig{
 			Address:       "localhost",
 			Port:          8080,
-			TransportMode: "sse", // Already set correctly
 			Name:          "mcp-cron",
 			Version:       "0.1.0",
+			TransportMode: "sse",
 		},
 		Scheduler: SchedulerConfig{
 			DefaultTimeout: 10 * time.Minute,
@@ -124,29 +131,34 @@ func DefaultConfig() *Config {
 		OpenWebUI: OpenWebUIConfig{
 			BaseURL:        "http://localhost:3000",
 			APIKey:         "",
-			Model:          "",
-			UserID:         "scheduler",
+			Model:          "gpt-4o",
+			UserID:         "",
 			RequestTimeout: 60,
-			Enabled:        true,
+			Enabled:        false,
 		},
 		Database: DatabaseConfig{
-			Path:    filepath.Join(os.Getenv("HOME"), ".mcp-cron", "mcp-cron.db"),
+			Path:    "./mcp-cron.db",
 			Enabled: true,
-		},
-		OpenRouter: OpenRouterConfig{
-			APIKey:      "", // Must be set via environment
-			Model:       "anthropic/claude-3.5-sonnet",
-			MCPProxyURL: "http://localhost:9876", // Default, override via env
-			MCPProxyKey: "",                      // Must be set via environment
-			Enabled:     false,
 		},
 		Ollama: OllamaConfig{
-			Enabled: true,
-			BaseURL: "http://localhost:11434",
+			BaseURL:        "http://localhost:11434",
+			DefaultModel:   "llama3.2:3b", // Lightweight default
+			Enabled:        true,
+			RequestTimeout: 60,
+		},
+		OpenRouter: OpenRouterConfig{
+			APIKey:         "",
+			DefaultModel:   "anthropic/claude-3.5-sonnet",
+			MCPProxyURL:    "http://localhost:3001",
+			MCPProxyKey:    "",
+			RequestTimeout: 120,
+			Enabled:        false,
 		},
 		ModelRouter: ModelRouterConfig{
 			Enabled:          true,
 			PreferLocal:      true,
+			FallbackToCloud:  true,
+			DefaultHint:      "balanced",
 			MaxCostPerTask:   0.50,
 			SpeedWeight:      0.3,
 			CostWeight:       0.4,
@@ -220,117 +232,140 @@ func (c *Config) Validate() error {
 	return nil
 }
 
-// FromEnv loads configuration from environment variables
-func FromEnv(config *Config) {
-	// Server configuration
-	if val := os.Getenv("MCP_CRON_SERVER_ADDRESS"); val != "" {
-		config.Server.Address = val
+func FromEnv(cfg *Config) {
+	if addr := os.Getenv("MCP_CRON_SERVER_ADDRESS"); addr != "" {
+		cfg.Server.Address = addr
 	}
-	if val := os.Getenv("MCP_CRON_SERVER_PORT"); val != "" {
-		if port, err := strconv.Atoi(val); err == nil {
-			config.Server.Port = port
+	if port := os.Getenv("MCP_CRON_SERVER_PORT"); port != "" {
+		if p, err := strconv.Atoi(port); err == nil {
+			cfg.Server.Port = p
 		}
 	}
-	if val := os.Getenv("MCP_CRON_SERVER_TRANSPORT"); val != "" {
-		config.Server.TransportMode = val
+	if name := os.Getenv("MCP_CRON_SERVER_NAME"); name != "" {
+		cfg.Server.Name = name
 	}
-	if val := os.Getenv("MCP_CRON_SERVER_NAME"); val != "" {
-		config.Server.Name = val
+	if version := os.Getenv("MCP_CRON_SERVER_VERSION"); version != "" {
+		cfg.Server.Version = version
 	}
-	if val := os.Getenv("MCP_CRON_SERVER_VERSION"); val != "" {
-		config.Server.Version = val
+	if transport := os.Getenv("MCP_CRON_SERVER_TRANSPORT"); transport != "" {
+		cfg.Server.TransportMode = transport
 	}
 
-	// Scheduler configuration
-	if val := os.Getenv("MCP_CRON_SCHEDULER_DEFAULT_TIMEOUT"); val != "" {
-		if duration, err := time.ParseDuration(val); err == nil {
-			config.Scheduler.DefaultTimeout = duration
+	if timeout := os.Getenv("MCP_CRON_SCHEDULER_DEFAULT_TIMEOUT"); timeout != "" {
+		if t, err := time.ParseDuration(timeout); err == nil {
+			cfg.Scheduler.DefaultTimeout = t
 		}
 	}
 
-	// Logging configuration
-	if val := os.Getenv("MCP_CRON_LOGGING_LEVEL"); val != "" {
-		config.Logging.Level = val
+	if level := os.Getenv("MCP_CRON_LOGGING_LEVEL"); level != "" {
+		cfg.Logging.Level = level
 	}
-	if val := os.Getenv("MCP_CRON_LOGGING_FILE"); val != "" {
-		config.Logging.FilePath = val
+	if filePath := os.Getenv("MCP_CRON_LOGGING_FILE_PATH"); filePath != "" {
+		cfg.Logging.FilePath = filePath
 	}
 
 	// OpenWebUI configuration
-	if val := os.Getenv("MCP_CRON_OPENWEBUI_BASE_URL"); val != "" {
-		config.OpenWebUI.BaseURL = val
+	if baseURL := os.Getenv("MCP_CRON_OPENWEBUI_BASE_URL"); baseURL != "" {
+		cfg.OpenWebUI.BaseURL = baseURL
 	}
-	if val := os.Getenv("MCP_CRON_OPENWEBUI_API_KEY"); val != "" {
-		config.OpenWebUI.APIKey = val
+	if apiKey := os.Getenv("MCP_CRON_OPENWEBUI_API_KEY"); apiKey != "" {
+		cfg.OpenWebUI.APIKey = apiKey
 	}
-	if val := os.Getenv("MCP_CRON_OPENWEBUI_MODEL"); val != "" {
-		config.OpenWebUI.Model = val
+	if model := os.Getenv("MCP_CRON_OPENWEBUI_MODEL"); model != "" {
+		cfg.OpenWebUI.Model = model
 	}
-	if val := os.Getenv("MCP_CRON_OPENWEBUI_USER_ID"); val != "" {
-		config.OpenWebUI.UserID = val
+	if userID := os.Getenv("MCP_CRON_OPENWEBUI_USER_ID"); userID != "" {
+		cfg.OpenWebUI.UserID = userID
 	}
-	if val := os.Getenv("MCP_CRON_OPENWEBUI_REQUEST_TIMEOUT"); val != "" {
-		if timeout, err := strconv.Atoi(val); err == nil {
-			config.OpenWebUI.RequestTimeout = timeout
+	if timeout := os.Getenv("MCP_CRON_OPENWEBUI_REQUEST_TIMEOUT"); timeout != "" {
+		if t, err := strconv.Atoi(timeout); err == nil {
+			cfg.OpenWebUI.RequestTimeout = t
 		}
 	}
-	if val := os.Getenv("MCP_CRON_OPENWEBUI_ENABLED"); val != "" {
-		config.OpenWebUI.Enabled = strings.ToLower(val) == "true"
+	if enabled := os.Getenv("MCP_CRON_OPENWEBUI_ENABLED"); enabled != "" {
+		cfg.OpenWebUI.Enabled = enabled == "true"
 	}
 
 	// Database configuration
-	if val := os.Getenv("MCP_CRON_DATABASE_PATH"); val != "" {
-		config.Database.Path = val
+	if dbPath := os.Getenv("MCP_CRON_DATABASE_PATH"); dbPath != "" {
+		cfg.Database.Path = dbPath
 	}
-	if val := os.Getenv("MCP_CRON_DATABASE_ENABLED"); val != "" {
-		config.Database.Enabled = strings.ToLower(val) == "true"
-	}
-
-	// OpenRouter configuration
-	if val := os.Getenv("OPENROUTER_API_KEY"); val != "" {
-		config.OpenRouter.APIKey = val
-	}
-	if val := os.Getenv("OPENROUTER_MODEL"); val != "" {
-		config.OpenRouter.Model = val
-	}
-	if val := os.Getenv("MCP_PROXY_URL"); val != "" {
-		config.OpenRouter.MCPProxyURL = val
-	}
-	if val := os.Getenv("MCP_PROXY_API_KEY"); val != "" {
-		config.OpenRouter.MCPProxyKey = val
-	}
-	if val := os.Getenv("OPENROUTER_ENABLED"); val != "" {
-		config.OpenRouter.Enabled = strings.ToLower(val) == "true"
-	}
-	if val := os.Getenv("USE_OPENROUTER"); val != "" {
-		config.UseOpenRouter = strings.ToLower(val) == "true"
+	if enabled := os.Getenv("MCP_CRON_DATABASE_ENABLED"); enabled != "" {
+		cfg.Database.Enabled = enabled == "true"
 	}
 
-	// OLLAMA configuration
-	if val := os.Getenv("OLLAMA_URL"); val != "" {
-		config.Ollama.BaseURL = val
+	// Ollama configuration
+	if baseURL := os.Getenv("MCP_CRON_OLLAMA_BASE_URL"); baseURL != "" {
+		cfg.Ollama.BaseURL = baseURL
 	}
-	if val := os.Getenv("OLLAMA_ENABLED"); val != "" {
-		config.Ollama.Enabled = strings.ToLower(val) == "true"
+	if model := os.Getenv("MCP_CRON_OLLAMA_DEFAULT_MODEL"); model != "" {
+		cfg.Ollama.DefaultModel = model
 	}
-
-	// Model router configuration
-	if val := os.Getenv("MODEL_ROUTER_ENABLED"); val != "" {
-		config.ModelRouter.Enabled = strings.ToLower(val) == "true"
+	if enabled := os.Getenv("MCP_CRON_OLLAMA_ENABLED"); enabled != "" {
+		cfg.Ollama.Enabled = enabled == "true"
 	}
-	if val := os.Getenv("MODEL_ROUTER_PREFER_LOCAL"); val != "" {
-		config.ModelRouter.PreferLocal = strings.ToLower(val) == "true"
-	}
-	if val := os.Getenv("MODEL_ROUTER_MAX_COST"); val != "" {
-		if cost, err := strconv.ParseFloat(val, 64); err == nil {
-			config.ModelRouter.MaxCostPerTask = cost
+	if timeout := os.Getenv("MCP_CRON_OLLAMA_REQUEST_TIMEOUT"); timeout != "" {
+		if t, err := strconv.Atoi(timeout); err == nil {
+			cfg.Ollama.RequestTimeout = t
 		}
 	}
 
-	// Auto-logic: if USE_OPENROUTER is true or OpenRouter is enabled, disable OpenWebUI
-	if config.UseOpenRouter || config.OpenRouter.Enabled {
-		config.OpenWebUI.Enabled = false
-		fmt.Printf("INFO: OpenRouter enabled (UseOpenRouter=%v, OpenRouter.Enabled=%v), automatically disabling OpenWebUI\n",
-			config.UseOpenRouter, config.OpenRouter.Enabled)
+	// OpenRouter configuration
+	if apiKey := os.Getenv("MCP_CRON_OPENROUTER_API_KEY"); apiKey != "" {
+		cfg.OpenRouter.APIKey = apiKey
+		cfg.OpenRouter.Enabled = true
+	}
+	if model := os.Getenv("MCP_CRON_OPENROUTER_DEFAULT_MODEL"); model != "" {
+		cfg.OpenRouter.DefaultModel = model
+	}
+	if proxyURL := os.Getenv("MCP_CRON_OPENROUTER_MCP_PROXY_URL"); proxyURL != "" {
+		cfg.OpenRouter.MCPProxyURL = proxyURL
+	}
+	if proxyKey := os.Getenv("MCP_CRON_OPENROUTER_MCP_PROXY_KEY"); proxyKey != "" {
+		cfg.OpenRouter.MCPProxyKey = proxyKey
+	}
+	if enabled := os.Getenv("MCP_CRON_OPENROUTER_ENABLED"); enabled != "" {
+		cfg.OpenRouter.Enabled = enabled == "true"
+	}
+	if timeout := os.Getenv("MCP_CRON_OPENROUTER_REQUEST_TIMEOUT"); timeout != "" {
+		if t, err := strconv.Atoi(timeout); err == nil {
+			cfg.OpenRouter.RequestTimeout = t
+		}
+	}
+
+	// Model Router configuration
+	if enabled := os.Getenv("MCP_CRON_MODEL_ROUTER_ENABLED"); enabled != "" {
+		cfg.ModelRouter.Enabled = enabled == "true"
+	}
+	if preferLocal := os.Getenv("MCP_CRON_MODEL_ROUTER_PREFER_LOCAL"); preferLocal != "" {
+		cfg.ModelRouter.PreferLocal = preferLocal == "true"
+	}
+	if fallback := os.Getenv("MCP_CRON_MODEL_ROUTER_FALLBACK_TO_CLOUD"); fallback != "" {
+		cfg.ModelRouter.FallbackToCloud = fallback == "true"
+	}
+	if hint := os.Getenv("MCP_CRON_MODEL_ROUTER_DEFAULT_HINT"); hint != "" {
+		cfg.ModelRouter.DefaultHint = hint
+	}
+	if maxCost := os.Getenv("MCP_CRON_MODEL_ROUTER_MAX_COST_PER_TASK"); maxCost != "" {
+		if cost, err := strconv.ParseFloat(maxCost, 64); err == nil {
+			cfg.ModelRouter.MaxCostPerTask = cost
+		}
+	}
+
+	// Legacy OpenRouter support
+	if os.Getenv("OPENROUTER_API_KEY") != "" && cfg.OpenRouter.APIKey == "" {
+		cfg.OpenRouter.APIKey = os.Getenv("OPENROUTER_API_KEY")
+		cfg.OpenRouter.Enabled = true
+	}
+	if useOpenRouter := os.Getenv("MCP_CRON_USE_OPENROUTER"); useOpenRouter != "" {
+		cfg.UseOpenRouter = useOpenRouter == "true"
+	}
+
+	// Legacy MCP proxy environment variables
+	if mcpProxyURL := os.Getenv("MCP_PROXY_URL"); mcpProxyURL != "" && cfg.OpenRouter.MCPProxyURL == "" {
+		cfg.OpenRouter.MCPProxyURL = mcpProxyURL
+	}
+	if mcpProxyKey := os.Getenv("MCP_PROXY_API_KEY"); mcpProxyKey != "" && cfg.OpenRouter.MCPProxyKey == "" {
+		cfg.OpenRouter.MCPProxyKey = mcpProxyKey
 	}
 }
