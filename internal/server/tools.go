@@ -96,12 +96,6 @@ func (s *MCPServer) registerToolsDeclarative() {
 			Parameters:  RunSearchParams{},
 		},
 		{
-			Name:        "export_runs",
-			Description: "Exports run data in various formats (JSON, CSV, Markdown)",
-			Handler:     s.handleExportRuns,
-			Parameters:  ExportRunsParams{},
-		},
-		{
 			Name:        "create_agent",
 			Description: "Create a new autonomous AI agent with persistent conversation and memory",
 			Handler:     s.handleCreateAgent,
@@ -156,37 +150,11 @@ func (s *MCPServer) registerToolsDeclarative() {
 			Handler:     s.handleGetSystemMetrics,
 			Parameters:  struct{}{}, // No parameters needed
 		},
-
-		// Add maintenance window tools:
-		{
-			Name:        "add_maintenance_window",
-			Description: "Add a maintenance window during which tasks will be skipped",
-			Handler:     s.handleAddMaintenanceWindow,
-			Parameters:  MaintenanceWindowParams{},
-		},
-		{
-			Name:        "add_time_window",
-			Description: "Add a time window constraint for task execution",
-			Handler:     s.handleAddTimeWindow,
-			Parameters:  TimeWindowParams{},
-		},
-		{
-			Name:        "list_holidays",
-			Description: "List holidays for a specific date range and timezone",
-			Handler:     s.handleListHolidays,
-			Parameters:  HolidayQueryParams{},
-		},
 		{
 			Name:        "list_models",
 			Description: "List all available models from OpenRouter and OLLAMA",
 			Handler:     s.handleListModels,
 			Parameters:  struct{}{},
-		},
-		{
-			Name:        "batch_operations",
-			Description: "Perform multiple task operations in a single request with optional atomic transactions",
-			Handler:     s.handleBatchOperations,
-			Parameters:  BatchOperationParams{},
 		},
 	}
 
