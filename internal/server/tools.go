@@ -2,6 +2,8 @@
 package server
 
 import (
+	"fmt"
+
 	"github.com/ThinkInAIXYZ/go-mcp/protocol"
 	"github.com/ThinkInAIXYZ/go-mcp/server"
 )
@@ -194,14 +196,26 @@ func (s *MCPServer) registerToolsDeclarative() {
 	}
 }
 
-// registerToolWithError registers a tool with error handling
 func registerToolWithError(srv *server.Server, def ToolDefinition) {
-	tool, err := protocol.NewTool(def.Name, def.Description, def.Parameters)
+	// Convert parameters to a more compatible format for the MCP library
+	var params interface{}
+
+	// Handle different parameter types more safely
+	switch p := def.Parameters.(type) {
+	case struct{}:
+		// Empty struct - convert to nil or empty map
+		params = map[string]interface{}{}
+	default:
+		// For other types, try to use them directly
+		params = p
+	}
+
+	tool, err := protocol.NewTool(def.Name, def.Description, params)
 	if err != nil {
-		// In a real scenario, we might want to handle this differently,
-		// but for now we'll panic since this is a critical error
-		// that should never happen
-		panic(err)
+		// Instead of panicking, log the error and skip this tool
+		fmt.Printf("Warning: Failed to register tool '%s': %v\n", def.Name, err)
+		fmt.Printf("  Parameters type: %T\n", def.Parameters)
+		return // Skip this tool instead of crashing
 	}
 
 	srv.RegisterTool(tool, def.Handler)
