@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"mcp-cron-persistent/internal/activity"
 	"mcp-cron-persistent/internal/agent"
 	"mcp-cron-persistent/internal/command"
 	"mcp-cron-persistent/internal/config"
@@ -272,6 +273,17 @@ func (s *MCPServer) handleRunTask(request *protocol.CallToolRequest) (*protocol.
 		return createErrorResponse(err)
 	}
 
+	// Broadcast task start
+	activity.BroadcastActivity("INFO", "task",
+		fmt.Sprintf("Task '%s' started (manual trigger)", task.Name),
+		map[string]interface{}{
+			"taskId":    task.ID,
+			"taskName":  task.Name,
+			"taskType":  task.Type,
+			"trigger":   "manual",
+			"startTime": time.Now(),
+		})
+
 	// Parse timeout if provided
 	timeout := s.config.Scheduler.DefaultTimeout
 	if params.Timeout != "" {
@@ -301,9 +313,29 @@ func (s *MCPServer) handleRunTask(request *protocol.CallToolRequest) (*protocol.
 	if err != nil {
 		task.Status = model.StatusFailed
 		s.logger.Errorf("Task %s failed: %v", task.ID, err)
+		// Broadcast task failure
+		activity.BroadcastActivity("ERROR", "task",
+			fmt.Sprintf("Task '%s' failed: %s", task.Name, err.Error()),
+			map[string]interface{}{
+				"taskId":   task.ID,
+				"taskName": task.Name,
+				"error":    err.Error(),
+				"duration": duration.Seconds(),
+				"trigger":  "manual",
+			})
 	} else {
 		task.Status = model.StatusCompleted
 		s.logger.Infof("Task %s completed successfully", task.ID)
+		// Broadcast task success
+		activity.BroadcastActivity("INFO", "task",
+			fmt.Sprintf("Task '%s' completed successfully in %v", task.Name, duration),
+			map[string]interface{}{
+				"taskId":   task.ID,
+				"taskName": task.Name,
+				"duration": duration.Seconds(),
+				"status":   "completed",
+				"trigger":  "manual",
+			})
 	}
 
 	// Update the task in scheduler (this will save to storage if available)
@@ -443,8 +475,27 @@ func (s *MCPServer) handleAddTask(request *protocol.CallToolRequest) (*protocol.
 
 	// Add task to scheduler
 	if err := s.scheduler.AddTask(task); err != nil {
+		activity.BroadcastActivity("ERROR", "task_management",
+			fmt.Sprintf("Failed to create task '%s': %s", params.Name, err.Error()),
+			map[string]interface{}{
+				"taskName": params.Name,
+				"taskType": "shell",
+				"error":    err.Error(),
+			})
 		return createErrorResponse(err)
 	}
+
+	// Broadcast task creation
+	activity.BroadcastActivity("INFO", "task_management",
+		fmt.Sprintf("New task created: '%s' (shell command)", task.Name),
+		map[string]interface{}{
+			"taskId":   task.ID,
+			"taskName": task.Name,
+			"taskType": "shell",
+			"schedule": task.Schedule,
+			"enabled":  task.Enabled,
+			"command":  task.Command,
+		})
 
 	return createTaskResponse(task)
 }
@@ -470,8 +521,27 @@ func (s *MCPServer) handleAddAITask(request *protocol.CallToolRequest) (*protoco
 
 	// Add task to scheduler
 	if err := s.scheduler.AddTask(task); err != nil {
+		activity.BroadcastActivity("ERROR", "task_management",
+			fmt.Sprintf("Failed to create AI task '%s': %s", params.Name, err.Error()),
+			map[string]interface{}{
+				"taskName": params.Name,
+				"taskType": "ai",
+				"error":    err.Error(),
+			})
 		return createErrorResponse(err)
 	}
+
+	// Broadcast AI task creation
+	activity.BroadcastActivity("INFO", "task_management",
+		fmt.Sprintf("New AI task created: '%s'", task.Name),
+		map[string]interface{}{
+			"taskId":   task.ID,
+			"taskName": task.Name,
+			"taskType": "ai",
+			"schedule": task.Schedule,
+			"enabled":  task.Enabled,
+			"prompt":   task.Prompt,
+		})
 
 	return createTaskResponse(task)
 }
@@ -689,10 +759,36 @@ func (s *MCPServer) handleRemoveTask(request *protocol.CallToolRequest) (*protoc
 
 	s.logger.Debugf("Handling remove_task request for task %s", taskID)
 
-	// Remove task
-	if err := s.scheduler.RemoveTask(taskID); err != nil {
+	// Get task details before removal for broadcasting
+	task, err := s.scheduler.GetTask(taskID)
+	if err != nil {
 		return createErrorResponse(err)
 	}
+
+	// Store task details for broadcasting after removal
+	taskName := task.Name
+	taskType := task.Type
+
+	// Remove task
+	if err := s.scheduler.RemoveTask(taskID); err != nil {
+		activity.BroadcastActivity("ERROR", "task_management",
+			fmt.Sprintf("Failed to delete task '%s': %s", taskName, err.Error()),
+			map[string]interface{}{
+				"taskId":   taskID,
+				"taskName": taskName,
+				"error":    err.Error(),
+			})
+		return createErrorResponse(err)
+	}
+
+	// Broadcast task deletion
+	activity.BroadcastActivity("WARN", "task_management",
+		fmt.Sprintf("Task deleted: '%s'", taskName),
+		map[string]interface{}{
+			"taskId":   taskID,
+			"taskName": taskName,
+			"taskType": taskType,
+		})
 
 	return createSuccessResponse(fmt.Sprintf("Task %s removed successfully", taskID))
 }
@@ -707,18 +803,40 @@ func (s *MCPServer) handleEnableTask(request *protocol.CallToolRequest) (*protoc
 
 	s.logger.Debugf("Handling enable_task request for task %s", taskID)
 
-	// Enable task
-	if err := s.scheduler.EnableTask(taskID); err != nil {
-		return createErrorResponse(err)
-	}
-
-	// Get updated task
+	// Get task details before enabling
 	task, err := s.scheduler.GetTask(taskID)
 	if err != nil {
 		return createErrorResponse(err)
 	}
 
-	return createTaskResponse(task)
+	// Enable task
+	if err := s.scheduler.EnableTask(taskID); err != nil {
+		activity.BroadcastActivity("ERROR", "task_management",
+			fmt.Sprintf("Failed to enable task '%s': %s", task.Name, err.Error()),
+			map[string]interface{}{
+				"taskId":   taskID,
+				"taskName": task.Name,
+				"error":    err.Error(),
+			})
+		return createErrorResponse(err)
+	}
+
+	// Broadcast task enable
+	activity.BroadcastActivity("INFO", "task_management",
+		fmt.Sprintf("Task enabled: '%s'", task.Name),
+		map[string]interface{}{
+			"taskId":   taskID,
+			"taskName": task.Name,
+			"action":   "enabled",
+		})
+
+	// Get updated task
+	updatedTask, err := s.scheduler.GetTask(taskID)
+	if err != nil {
+		return createErrorResponse(err)
+	}
+
+	return createTaskResponse(updatedTask)
 }
 
 // handleDisableTask disables a task
@@ -731,18 +849,40 @@ func (s *MCPServer) handleDisableTask(request *protocol.CallToolRequest) (*proto
 
 	s.logger.Debugf("Handling disable_task request for task %s", taskID)
 
-	// Disable task
-	if err := s.scheduler.DisableTask(taskID); err != nil {
-		return createErrorResponse(err)
-	}
-
-	// Get updated task
+	// Get task details before disabling
 	task, err := s.scheduler.GetTask(taskID)
 	if err != nil {
 		return createErrorResponse(err)
 	}
 
-	return createTaskResponse(task)
+	// Disable task
+	if err := s.scheduler.DisableTask(taskID); err != nil {
+		activity.BroadcastActivity("ERROR", "task_management",
+			fmt.Sprintf("Failed to disable task '%s': %s", task.Name, err.Error()),
+			map[string]interface{}{
+				"taskId":   taskID,
+				"taskName": task.Name,
+				"error":    err.Error(),
+			})
+		return createErrorResponse(err)
+	}
+
+	// Broadcast task disable
+	activity.BroadcastActivity("INFO", "task_management",
+		fmt.Sprintf("Task disabled: '%s'", task.Name),
+		map[string]interface{}{
+			"taskId":   taskID,
+			"taskName": task.Name,
+			"action":   "disabled",
+		})
+
+	// Get updated task
+	updatedTask, err := s.scheduler.GetTask(taskID)
+	if err != nil {
+		return createErrorResponse(err)
+	}
+
+	return createTaskResponse(updatedTask)
 }
 
 func (s *MCPServer) Execute(ctx context.Context, task *model.Task, timeout time.Duration) error {

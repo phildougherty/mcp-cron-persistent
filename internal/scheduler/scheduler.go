@@ -4,6 +4,7 @@ package scheduler
 import (
 	"context"
 	"fmt"
+	"mcp-cron-persistent/internal/activity"
 	"mcp-cron-persistent/internal/config"
 	"mcp-cron-persistent/internal/errors"
 	"mcp-cron-persistent/internal/logging"
@@ -424,16 +425,43 @@ func (s *Scheduler) scheduleTask(task *model.Task) error {
 func (s *Scheduler) executeTaskWithObservability(task *model.Task) {
 	startTime := time.Now()
 
+	// Broadcast task start
+	activity.BroadcastActivity("INFO", "task",
+		fmt.Sprintf("Task '%s' started (scheduled)", task.Name),
+		map[string]interface{}{
+			"taskId":    task.ID,
+			"taskName":  task.Name,
+			"taskType":  task.Type,
+			"trigger":   "scheduled",
+			"schedule":  task.Schedule,
+			"startTime": startTime,
+		})
+
 	// Check if execution should be skipped
 	skip, reason, err := s.ShouldSkipExecution(task, startTime)
 	if err != nil {
+		activity.BroadcastActivity("ERROR", "task",
+			fmt.Sprintf("Task '%s' failed skip check: %s", task.Name, err.Error()),
+			map[string]interface{}{
+				"taskId":   task.ID,
+				"taskName": task.Name,
+				"error":    err.Error(),
+				"trigger":  "scheduled",
+			})
 		if s.metricsCollector != nil {
 			s.metricsCollector.RecordTaskExecution(task, time.Since(startTime), err)
 		}
 		return
 	}
-
 	if skip {
+		activity.BroadcastActivity("INFO", "task",
+			fmt.Sprintf("Task '%s' skipped: %s", task.Name, reason),
+			map[string]interface{}{
+				"taskId":     task.ID,
+				"taskName":   task.Name,
+				"skipReason": reason,
+				"trigger":    "scheduled",
+			})
 		logging.GetDefaultLogger().WithField("task_id", task.ID).
 			Infof("Skipping task execution: %s", reason)
 		return
@@ -463,14 +491,41 @@ func (s *Scheduler) executeTaskWithObservability(task *model.Task) {
 		result.Error = err.Error()
 		result.ExitCode = 1
 		execErr = err
+
+		// Broadcast task failure
+		duration := time.Since(startTime)
+		activity.BroadcastActivity("ERROR", "task",
+			fmt.Sprintf("Task '%s' failed: %s", task.Name, err.Error()),
+			map[string]interface{}{
+				"taskId":   task.ID,
+				"taskName": task.Name,
+				"taskType": task.Type,
+				"error":    err.Error(),
+				"duration": duration.Seconds(),
+				"trigger":  "scheduled",
+				"exitCode": 1,
+			})
 	} else {
 		task.Status = model.StatusCompleted
 		result.ExitCode = 0
+
+		// Broadcast task success
+		duration := time.Since(startTime)
+		activity.BroadcastActivity("INFO", "task",
+			fmt.Sprintf("Task '%s' completed successfully in %v", task.Name, duration),
+			map[string]interface{}{
+				"taskId":   task.ID,
+				"taskName": task.Name,
+				"taskType": task.Type,
+				"duration": duration.Seconds(),
+				"status":   "completed",
+				"trigger":  "scheduled",
+				"exitCode": 0,
+			})
 	}
 
 	result.EndTime = time.Now()
 	result.Duration = result.EndTime.Sub(result.StartTime).String()
-
 	task.UpdatedAt = time.Now()
 	s.updateNextRunTime(task)
 	s.saveTaskToStorage(task)
@@ -557,10 +612,20 @@ func (s *Scheduler) AddTask(task *model.Task) error {
 		if err != nil {
 			task.Status = model.StatusFailed
 			s.saveTaskToStorage(task)
+
+			activity.BroadcastActivity("ERROR", "task_management",
+				fmt.Sprintf("Failed to schedule task '%s': %s", task.Name, err.Error()),
+				map[string]interface{}{
+					"taskId":   task.ID,
+					"taskName": task.Name,
+					"taskType": task.Type,
+					"error":    err.Error(),
+				})
 			return err
 		}
 	}
 
+	// Note: Don't broadcast here as it's already handled in the server handlers
 	return nil
 }
 
@@ -573,7 +638,6 @@ func (s *Scheduler) EnableTask(taskID string) error {
 	if !exists {
 		return errors.NotFound("task", taskID)
 	}
-
 	if task.Enabled {
 		return nil // Already enabled
 	}
@@ -585,10 +649,19 @@ func (s *Scheduler) EnableTask(taskID string) error {
 	if err != nil {
 		task.Status = model.StatusFailed
 		s.saveTaskToStorage(task)
+
+		activity.BroadcastActivity("ERROR", "task_management",
+			fmt.Sprintf("Failed to enable task '%s': %s", task.Name, err.Error()),
+			map[string]interface{}{
+				"taskId":   taskID,
+				"taskName": task.Name,
+				"error":    err.Error(),
+			})
 		return err
 	}
 
 	s.saveTaskToStorage(task)
+	// Note: Don't broadcast here as it's handled in the server handlers
 	return nil
 }
 
@@ -601,7 +674,6 @@ func (s *Scheduler) DisableTask(taskID string) error {
 	if !exists {
 		return errors.NotFound("task", taskID)
 	}
-
 	if !task.Enabled {
 		return nil // Already disabled
 	}
@@ -621,6 +693,8 @@ func (s *Scheduler) DisableTask(taskID string) error {
 	task.Status = model.StatusDisabled
 	task.UpdatedAt = time.Now()
 	s.saveTaskToStorage(task)
+
+	// Note: Don't broadcast here as it's handled in the server handlers
 	return nil
 }
 
@@ -660,13 +734,43 @@ func (s *Scheduler) TriggerTask(task *model.Task) {
 }
 
 // executeTaskNow executes a task immediately
+// executeTaskNow executes a task immediately
 func (s *Scheduler) executeTaskNow(task *model.Task) {
 	if s.taskExecutor == nil {
+		activity.BroadcastActivity("ERROR", "task",
+			fmt.Sprintf("Cannot execute task '%s': no task executor set", task.Name),
+			map[string]interface{}{
+				"taskId":   task.ID,
+				"taskName": task.Name,
+				"error":    "no task executor set",
+				"trigger":  "immediate",
+			})
 		fmt.Printf("Cannot execute task %s: no task executor set\n", task.ID)
 		return
 	}
 
-	task.LastRun = time.Now()
+	startTime := time.Now()
+
+	// Determine trigger type for broadcasting
+	triggerType := "immediate"
+	if task.TriggerType == model.TriggerTypeDependency {
+		triggerType = "dependency"
+	} else if task.TriggerType == model.TriggerTypeWatcher {
+		triggerType = "watcher"
+	}
+
+	// Broadcast task start
+	activity.BroadcastActivity("INFO", "task",
+		fmt.Sprintf("Task '%s' started (%s)", task.Name, triggerType),
+		map[string]interface{}{
+			"taskId":    task.ID,
+			"taskName":  task.Name,
+			"taskType":  task.Type,
+			"trigger":   triggerType,
+			"startTime": startTime,
+		})
+
+	task.LastRun = startTime
 	task.Status = model.StatusRunning
 	s.saveTaskToStorage(task)
 
@@ -679,8 +783,35 @@ func (s *Scheduler) executeTaskNow(task *model.Task) {
 	// Execute the task
 	if err := s.taskExecutor.Execute(ctx, task, timeout); err != nil {
 		task.Status = model.StatusFailed
+
+		// Broadcast task failure
+		duration := time.Since(startTime)
+		activity.BroadcastActivity("ERROR", "task",
+			fmt.Sprintf("Task '%s' failed: %s", task.Name, err.Error()),
+			map[string]interface{}{
+				"taskId":   task.ID,
+				"taskName": task.Name,
+				"taskType": task.Type,
+				"error":    err.Error(),
+				"duration": duration.Seconds(),
+				"trigger":  triggerType,
+			})
 	} else {
 		task.Status = model.StatusCompleted
+
+		// Broadcast task success
+		duration := time.Since(startTime)
+		activity.BroadcastActivity("INFO", "task",
+			fmt.Sprintf("Task '%s' completed successfully in %v", task.Name, duration),
+			map[string]interface{}{
+				"taskId":   task.ID,
+				"taskName": task.Name,
+				"taskType": task.Type,
+				"duration": duration.Seconds(),
+				"status":   "completed",
+				"trigger":  triggerType,
+			})
+
 		// Notify dependency manager of completion
 		s.dependencyManager.OnTaskCompleted(task.ID)
 	}
