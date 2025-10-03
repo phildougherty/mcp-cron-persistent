@@ -81,6 +81,9 @@ func (s *MCPServer) handleAddDependencyTask(request *protocol.CallToolRequest) (
 	task.DependsOn = params.DependsOn
 	task.TriggerType = model.TriggerTypeDependency
 
+	chatCtx := extractChatContext(request)
+	applyChatContext(task, chatCtx)
+
 	// Add task to scheduler
 	if err := s.scheduler.AddTask(task); err != nil {
 		return createErrorResponse(err)
@@ -142,6 +145,9 @@ func (s *MCPServer) handleAddWatcherTask(request *protocol.CallToolRequest) (*pr
 	task.WatcherConfig = params.WatcherConfig
 	task.TriggerType = model.TriggerTypeWatcher
 	task.Schedule = "" // Watchers don't use cron schedules
+
+	chatCtx := extractChatContext(request)
+	applyChatContext(task, chatCtx)
 
 	// Add task to scheduler
 	if err := s.scheduler.AddTask(task); err != nil {

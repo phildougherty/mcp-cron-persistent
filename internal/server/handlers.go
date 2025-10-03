@@ -24,12 +24,42 @@ type UnifiedTaskParams struct {
 	Type        string `json:"type,omitempty"`
 }
 
+// ChatContext holds chat session information passed from mcp-compose
+type ChatContext struct {
+	SessionID    string
+	OutputToChat bool
+}
+
 // extractParams extracts parameters from a tool request
 func extractParams(request *protocol.CallToolRequest, params interface{}) error {
 	if err := utils.JsonUnmarshal(request.RawArguments, params); err != nil {
 		return errors.InvalidInput(fmt.Sprintf("invalid parameters: %v", err))
 	}
 	return nil
+}
+
+// extractChatContext extracts chat context from MCP tool request arguments
+func extractChatContext(request *protocol.CallToolRequest) *ChatContext {
+	var rawArgs map[string]interface{}
+	if err := utils.JsonUnmarshal(request.RawArguments, &rawArgs); err != nil {
+		return nil
+	}
+
+	context := &ChatContext{}
+
+	if sessionID, ok := rawArgs["_chat_session_id"].(string); ok {
+		context.SessionID = sessionID
+	}
+
+	if outputToChat, ok := rawArgs["_output_to_chat"].(bool); ok {
+		context.OutputToChat = outputToChat
+	}
+
+	if context.SessionID == "" && !context.OutputToChat {
+		return nil
+	}
+
+	return context
 }
 
 // extractTaskIDParam extracts the task ID parameter from a request

@@ -516,6 +516,9 @@ func (s *MCPServer) handleAddTask(request *protocol.CallToolRequest) (*protocol.
 	task.Type = model.TypeShellCommand.String()
 	task.Command = params.Command
 
+	chatCtx := extractChatContext(request)
+	applyChatContext(task, chatCtx)
+
 	// Add task to scheduler
 	if err := s.scheduler.AddTask(task); err != nil {
 		activity.BroadcastActivity("ERROR", "task_management",
@@ -561,6 +564,9 @@ func (s *MCPServer) handleAddAITask(request *protocol.CallToolRequest) (*protoco
 	task := createBaseTask(params.Name, params.Schedule, params.Description, params.Enabled)
 	task.Type = model.TypeAI.String()
 	task.Prompt = params.Prompt
+
+	chatCtx := extractChatContext(request)
+	applyChatContext(task, chatCtx)
 
 	// Add task to scheduler
 	if err := s.scheduler.AddTask(task); err != nil {
@@ -611,6 +617,9 @@ func (s *MCPServer) handleCreateAgent(request *protocol.CallToolRequest) (*proto
 	task.IsAgent = true
 	task.AgentPersonality = params.Personality
 	task.ConversationContext = params.Context
+
+	chatCtx := extractChatContext(request)
+	applyChatContext(task, chatCtx)
 
 	// Agent tasks will get their conversation ID when first executed
 	if params.Name != "" {
@@ -720,6 +729,19 @@ func createBaseTask(name, schedule, description string, enabled bool) *model.Tas
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
+}
+
+// applyChatContext applies chat context to a task if available
+func applyChatContext(task *model.Task, chatCtx *ChatContext) {
+	if chatCtx == nil {
+		return
+	}
+
+	if chatCtx.SessionID != "" {
+		task.ChatSessionID = chatCtx.SessionID
+	}
+
+	task.OutputToChat = chatCtx.OutputToChat
 }
 
 // handleUpdateTask updates an existing task

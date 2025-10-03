@@ -45,6 +45,9 @@ func (s *MCPServer) handleAddManualTask(request *protocol.CallToolRequest) (*pro
 	task.RunOnDemandOnly = true
 	task.TriggerType = model.TriggerTypeManual
 
+	chatCtx := extractChatContext(request)
+	applyChatContext(task, chatCtx)
+
 	// Add task to scheduler
 	if err := s.scheduler.AddTask(task); err != nil {
 		return createErrorResponse(err)
