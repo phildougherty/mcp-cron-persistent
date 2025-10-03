@@ -284,10 +284,11 @@ func (s *PostgresStorage) ListTasks() ([]*model.Task, error) {
 		var task model.Task
 		var lastRun, nextRun sql.NullTime
 		var conversationID, conversationName, chatSessionID sql.NullString
+		var command, prompt sql.NullString
 
 		err := rows.Scan(
 			&task.ID, &task.Name, &task.Description, &task.Type,
-			&task.Enabled, &task.Command, &task.Prompt, &task.Schedule,
+			&task.Enabled, &command, &prompt, &task.Schedule,
 			&task.Status, &lastRun, &nextRun, &task.CreatedAt, &task.UpdatedAt,
 			&conversationID, &conversationName, &task.IsAgent, &chatSessionID,
 		)
@@ -295,6 +296,12 @@ func (s *PostgresStorage) ListTasks() ([]*model.Task, error) {
 			return nil, fmt.Errorf("failed to scan task: %w", err)
 		}
 
+		if command.Valid {
+			task.Command = command.String
+		}
+		if prompt.Valid {
+			task.Prompt = prompt.String
+		}
 		if lastRun.Valid {
 			task.LastRun = lastRun.Time
 		}
