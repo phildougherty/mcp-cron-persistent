@@ -58,7 +58,7 @@ type Task struct {
 	CreatedAt   time.Time  `json:"createdAt,omitempty"`
 	UpdatedAt   time.Time  `json:"updatedAt,omitempty"`
 
-	// Conversation and agent support
+	// Conversation and agent support (OpenWebUI)
 	ConversationID      string         `json:"conversationId,omitempty" description:"OpenWebUI conversation ID for persistent context"`
 	ConversationName    string         `json:"conversationName,omitempty" description:"Human-readable name for the conversation"`
 	ConversationContext string         `json:"conversationContext,omitempty" description:"Additional context for the conversation"`
@@ -66,6 +66,16 @@ type Task struct {
 	AgentPersonality    string         `json:"agentPersonality,omitempty" description:"Personality/role description for the agent"`
 	MemorySummary       string         `json:"memorySummary,omitempty" description:"Summarized memory from previous executions"`
 	LastMemoryUpdate    *time.Time     `json:"lastMemoryUpdate,omitempty" description:"When memory was last updated"`
+
+	// MCP-Compose Chat Integration
+	ChatSessionID         string   `json:"chatSessionId,omitempty" description:"MCP-Compose chat session ID for task created via chat"`
+	OutputToChat          bool     `json:"outputToChat,omitempty" description:"Whether to send task results back to chat"`
+	InheritSessionContext bool     `json:"inheritSessionContext,omitempty" description:"Whether to inherit context from chat session"`
+	Provider              string   `json:"provider,omitempty" description:"AI provider (inherited from chat session)"`
+	Model                 string   `json:"model,omitempty" description:"AI model (inherited from chat session)"`
+	MCPServers            []string `json:"mcpServers,omitempty" description:"MCP servers to use (inherited from chat session)"`
+	UserID                string   `json:"userId,omitempty" description:"User ID who created the task"`
+	CreatedBy             string   `json:"createdBy,omitempty" description:"Creator identifier"`
 	DependsOn           []string       `json:"dependsOn,omitempty" description:"task IDs this task depends on"`
 	TriggerType         string         `json:"triggerType,omitempty" description:"trigger type: schedule, dependency, watcher, manual"`
 	WatcherConfig       *WatcherConfig `json:"watcherConfig,omitempty" description:"configuration for watcher tasks"`

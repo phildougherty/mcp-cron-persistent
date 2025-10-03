@@ -4,6 +4,7 @@ package storage
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -81,10 +82,27 @@ func (s *PostgresStorage) createTask(ctx context.Context, task *model.Task) erro
 			id, name, description, type, enabled, command, prompt, schedule,
 			timezone, status, created_at, updated_at, conversation_id,
 			conversation_name, conversation_context, is_agent, agent_personality,
-			memory_summary, last_memory_update, user_id, created_by
+			memory_summary, last_memory_update, user_id, created_by,
+			chat_session_id, output_to_chat, inherit_session_context, provider, model, mcp_servers
 		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21,
+			$22, $23, $24, $25, $26, $27
 		)`
+
+	var mcpServersJSON interface{}
+	if len(task.MCPServers) > 0 {
+		mcpServersJSON = task.MCPServers
+	}
+
+	userID := task.UserID
+	if userID == "" {
+		userID = "default"
+	}
+
+	createdBy := task.CreatedBy
+	if createdBy == "" {
+		createdBy = "system"
+	}
 
 	_, err := s.db.ExecContext(ctx, query,
 		task.ID, task.Name, task.Description, task.Type, task.Enabled,
@@ -92,7 +110,9 @@ func (s *PostgresStorage) createTask(ctx context.Context, task *model.Task) erro
 		task.Status, task.CreatedAt, task.UpdatedAt, task.ConversationID,
 		task.ConversationName, task.ConversationContext, task.IsAgent,
 		task.AgentPersonality, task.MemorySummary, task.LastMemoryUpdate,
-		"default", "system",
+		userID, createdBy,
+		task.ChatSessionID, task.OutputToChat, task.InheritSessionContext,
+		task.Provider, task.Model, mcpServersJSON,
 	)
 
 	if err != nil {
@@ -150,7 +170,8 @@ func (s *PostgresStorage) GetTask(taskID string) (*model.Task, error) {
 		SELECT id, name, description, type, enabled, command, prompt, schedule,
 			   status, last_run, next_run, created_at, updated_at,
 			   conversation_id, conversation_name, conversation_context,
-			   is_agent, agent_personality, memory_summary, last_memory_update
+			   is_agent, agent_personality, memory_summary, last_memory_update,
+			   chat_session_id, output_to_chat, inherit_session_context, provider, model, mcp_servers, user_id, created_by
 		FROM task_scheduler.scheduler_tasks
 		WHERE id = $1`
 
@@ -158,6 +179,9 @@ func (s *PostgresStorage) GetTask(taskID string) (*model.Task, error) {
 	var lastRun, nextRun, lastMemoryUpdate sql.NullTime
 	var conversationID, conversationName, conversationContext sql.NullString
 	var agentPersonality, memorySummary sql.NullString
+	var chatSessionID, provider, model, userID, createdBy sql.NullString
+	var outputToChat, inheritSessionContext sql.NullBool
+	var mcpServersJSON []byte
 
 	err := s.db.QueryRowContext(ctx, query, taskID).Scan(
 		&task.ID, &task.Name, &task.Description, &task.Type, &task.Enabled,
@@ -165,6 +189,7 @@ func (s *PostgresStorage) GetTask(taskID string) (*model.Task, error) {
 		&lastRun, &nextRun, &task.CreatedAt, &task.UpdatedAt,
 		&conversationID, &conversationName, &conversationContext,
 		&task.IsAgent, &agentPersonality, &memorySummary, &lastMemoryUpdate,
+		&chatSessionID, &outputToChat, &inheritSessionContext, &provider, &model, &mcpServersJSON, &userID, &createdBy,
 	)
 
 	if err == sql.ErrNoRows {
@@ -200,6 +225,33 @@ func (s *PostgresStorage) GetTask(taskID string) (*model.Task, error) {
 		t := lastMemoryUpdate.Time
 		task.LastMemoryUpdate = &t
 	}
+	if chatSessionID.Valid {
+		task.ChatSessionID = chatSessionID.String
+	}
+	if outputToChat.Valid {
+		task.OutputToChat = outputToChat.Bool
+	}
+	if inheritSessionContext.Valid {
+		task.InheritSessionContext = inheritSessionContext.Bool
+	}
+	if provider.Valid {
+		task.Provider = provider.String
+	}
+	if model.Valid {
+		task.Model = model.String
+	}
+	if userID.Valid {
+		task.UserID = userID.String
+	}
+	if createdBy.Valid {
+		task.CreatedBy = createdBy.String
+	}
+	if len(mcpServersJSON) > 0 {
+		var servers []string
+		if err := json.Unmarshal(mcpServersJSON, &servers); err == nil {
+			task.MCPServers = servers
+		}
+	}
 
 	return &task, nil
 }
@@ -217,7 +269,7 @@ func (s *PostgresStorage) ListTasks() ([]*model.Task, error) {
 	query := `
 		SELECT id, name, description, type, enabled, command, prompt, schedule,
 			   status, last_run, next_run, created_at, updated_at,
-			   conversation_id, conversation_name, is_agent
+			   conversation_id, conversation_name, is_agent, chat_session_id
 		FROM task_scheduler.scheduler_tasks
 		ORDER BY created_at DESC`
 
@@ -231,13 +283,13 @@ func (s *PostgresStorage) ListTasks() ([]*model.Task, error) {
 	for rows.Next() {
 		var task model.Task
 		var lastRun, nextRun sql.NullTime
-		var conversationID, conversationName sql.NullString
+		var conversationID, conversationName, chatSessionID sql.NullString
 
 		err := rows.Scan(
 			&task.ID, &task.Name, &task.Description, &task.Type,
 			&task.Enabled, &task.Command, &task.Prompt, &task.Schedule,
 			&task.Status, &lastRun, &nextRun, &task.CreatedAt, &task.UpdatedAt,
-			&conversationID, &conversationName, &task.IsAgent,
+			&conversationID, &conversationName, &task.IsAgent, &chatSessionID,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan task: %w", err)
@@ -254,6 +306,9 @@ func (s *PostgresStorage) ListTasks() ([]*model.Task, error) {
 		}
 		if conversationName.Valid {
 			task.ConversationName = conversationName.String
+		}
+		if chatSessionID.Valid {
+			task.ChatSessionID = chatSessionID.String
 		}
 
 		tasks = append(tasks, &task)
