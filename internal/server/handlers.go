@@ -45,6 +45,7 @@ func extractParams(request *protocol.CallToolRequest, params interface{}) error 
 func extractChatContext(request *protocol.CallToolRequest) *ChatContext {
 	var rawArgs map[string]interface{}
 	if err := utils.JsonUnmarshal(request.RawArguments, &rawArgs); err != nil {
+		log.Printf("[INFO] Failed to unmarshal raw arguments for chat context extraction: %v", err)
 		return nil
 	}
 
@@ -52,18 +53,22 @@ func extractChatContext(request *protocol.CallToolRequest) *ChatContext {
 
 	if sessionID, ok := rawArgs["_chat_session_id"].(string); ok {
 		context.SessionID = sessionID
+		log.Printf("[INFO] EXTRACTION: Found _chat_session_id=%s", sessionID)
 	}
 
 	if outputToChat, ok := rawArgs["_output_to_chat"].(bool); ok {
 		context.OutputToChat = outputToChat
+		log.Printf("[INFO] EXTRACTION: Found _output_to_chat=%v", outputToChat)
 	}
 
 	if provider, ok := rawArgs["_provider"].(string); ok {
 		context.Provider = provider
+		log.Printf("[INFO] EXTRACTION: Found _provider=%s", provider)
 	}
 
 	if model, ok := rawArgs["_model"].(string); ok {
 		context.Model = model
+		log.Printf("[INFO] EXTRACTION: Found _model=%s", model)
 	}
 
 	if mcpServers, ok := rawArgs["_mcp_servers"].([]interface{}); ok {
@@ -73,12 +78,15 @@ func extractChatContext(request *protocol.CallToolRequest) *ChatContext {
 				context.MCPServers = append(context.MCPServers, serverStr)
 			}
 		}
+		log.Printf("[INFO] EXTRACTION: Found %d MCP servers", len(context.MCPServers))
 	}
 
 	if context.SessionID == "" && !context.OutputToChat {
+		log.Printf("[INFO] EXTRACTION: No valid chat context found in request")
 		return nil
 	}
 
+	log.Printf("[INFO] EXTRACTION: Successfully extracted chat context: session=%s, provider=%s, model=%s", context.SessionID, context.Provider, context.Model)
 	return context
 }
 
