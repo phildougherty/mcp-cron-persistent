@@ -499,7 +499,20 @@ func (s *PostgresStorage) postTaskResultToChat(ctx context.Context, taskID, runI
 	query := `SELECT chat_session_id, output_to_chat FROM task_scheduler.scheduler_tasks WHERE id = $1`
 	err := s.db.QueryRowContext(ctx, query, taskID).Scan(&chatSessionID, &outputToChat)
 
-	if err != nil || !outputToChat || chatSessionID == "" {
+	if err != nil {
+		fmt.Printf("[DEBUG] postTaskResultToChat: Failed to query task settings: %v\n", err)
+		return
+	}
+
+	fmt.Printf("[DEBUG] postTaskResultToChat: taskID=%s, outputToChat=%v, chatSessionID=%s\n", taskID, outputToChat, chatSessionID)
+
+	if !outputToChat {
+		fmt.Printf("[DEBUG] postTaskResultToChat: output_to_chat is false, skipping\n")
+		return
+	}
+
+	if chatSessionID == "" {
+		fmt.Printf("[DEBUG] postTaskResultToChat: chat_session_id is empty, skipping\n")
 		return
 	}
 
@@ -513,8 +526,10 @@ func (s *PostgresStorage) postTaskResultToChat(ctx context.Context, taskID, runI
 		dashboardURL = os.Getenv("MCP_COMPOSE_DASHBOARD_URL")
 	}
 	if dashboardURL == "" {
-		dashboardURL = "http://mcp-compose-dashboard:3001"
+		dashboardURL = "http://mcp-compose-dashboard:3111"
 	}
+
+	fmt.Printf("[INFO] Posting task output to chat: dashboardURL=%s, sessionID=%s, runID=%s\n", dashboardURL, chatSessionID, runID)
 
 	payload := map[string]interface{}{
 		"session_id":       chatSessionID,
@@ -526,6 +541,7 @@ func (s *PostgresStorage) postTaskResultToChat(ctx context.Context, taskID, runI
 
 	data, err := json.Marshal(payload)
 	if err != nil {
+		fmt.Printf("[ERROR] postTaskResultToChat: Failed to marshal payload: %v\n", err)
 		return
 	}
 
@@ -537,13 +553,23 @@ func (s *PostgresStorage) postTaskResultToChat(ctx context.Context, taskID, runI
 	)
 
 	if err != nil {
+		fmt.Printf("[ERROR] postTaskResultToChat: Failed to POST to dashboard: %v\n", err)
 		return
 	}
 	defer resp.Body.Close()
 
+	fmt.Printf("[DEBUG] postTaskResultToChat: HTTP response status: %d\n", resp.StatusCode)
+
 	if resp.StatusCode == http.StatusOK {
 		updateQuery := `UPDATE task_scheduler.scheduler_task_runs SET posted_to_chat = true WHERE id = $1`
-		s.db.ExecContext(ctx, updateQuery, runID)
+		_, updateErr := s.db.ExecContext(ctx, updateQuery, runID)
+		if updateErr != nil {
+			fmt.Printf("[ERROR] postTaskResultToChat: Failed to update posted_to_chat flag: %v\n", updateErr)
+		} else {
+			fmt.Printf("[INFO] Successfully posted task output to chat and marked as posted\n")
+		}
+	} else {
+		fmt.Printf("[ERROR] postTaskResultToChat: Dashboard returned non-OK status: %d\n", resp.StatusCode)
 	}
 }
 
