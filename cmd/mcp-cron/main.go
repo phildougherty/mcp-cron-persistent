@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"mcp-cron-persistent/internal/command"
 	"mcp-cron-persistent/internal/config"
 	"mcp-cron-persistent/internal/logging"
+	"mcp-cron-persistent/internal/model"
 	"mcp-cron-persistent/internal/observability"
 	"mcp-cron-persistent/internal/scheduler"
 	"mcp-cron-persistent/internal/server"
@@ -36,8 +38,10 @@ var (
 	showVersion = flag.Bool("version", false, "Show version information")
 
 	// Database flags
-	dbPath    = flag.String("db-path", "", "Path to SQLite database file")
-	disableDB = flag.Bool("disable-db", false, "Disable database persistence")
+	dbPath       = flag.String("db-path", "", "Path to SQLite database file")
+	disableDB    = flag.Bool("disable-db", false, "Disable database persistence")
+	postgresURL  = flag.String("postgres-url", "", "PostgreSQL connection URL")
+	postgresMode = flag.Bool("postgres", false, "Use PostgreSQL instead of SQLite")
 
 	// OpenWebUI flags
 	openwebuiURL     = flag.String("openwebui-url", "", "OpenWebUI base URL")
@@ -232,6 +236,12 @@ func applyCommandLineFlagsToConfig(cfg *config.Config) {
 	}
 }
 
+// StorageInterface defines the common interface for both SQLite and PostgreSQL storage
+type StorageInterface interface {
+	Close() error
+	LoadAllTasks() ([]*model.Task, error)
+}
+
 // Application represents the running application with enhanced capabilities
 type Application struct {
 	scheduler        *scheduler.Scheduler
@@ -239,10 +249,11 @@ type Application struct {
 	agentExecutor    *agent.AgentExecutor
 	server           *server.MCPServer
 	logger           *logging.Logger
-	storage          *storage.SQLiteStorage
+	storage          StorageInterface
 	metricsCollector *observability.MetricsCollector
 	config           *config.Config
 	dbPath           string
+	postgresEnabled  bool
 	startTime        time.Time
 }
 
@@ -308,24 +319,50 @@ func createApp(cfg *config.Config) (*Application, error) {
 	sched.SetTaskExecutor(mcpServer)
 
 	// Initialize storage if enabled (this will load and schedule existing tasks)
-	var sqliteStorage *storage.SQLiteStorage
+	var taskStorage StorageInterface
 	var dbPath string
+	var postgresEnabled bool
+
 	if cfg.Database.Enabled {
-		dbPath = cfg.Database.Path
-		sqliteStorage, err = storage.NewSQLiteStorage(dbPath)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create storage: %w", err)
-		}
+		// Check if PostgreSQL should be used
+		if cfg.Database.PostgresEnabled && cfg.Database.PostgresURL != "" {
+			postgresEnabled = true
+			postgresStorage, err := storage.NewPostgresStorage(cfg.Database.PostgresURL)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create PostgreSQL storage: %w", err)
+			}
 
-		// Set storage for the scheduler
-		if err := sched.SetStorage(sqliteStorage); err != nil {
-			sqliteStorage.Close()
-			return nil, fmt.Errorf("failed to set scheduler storage: %w", err)
-		}
+			taskStorage = postgresStorage
 
-		// Also set storage reference in MCP server
-		mcpServer.SetStorage(sqliteStorage)
-		logger.Infof("Database storage initialized: %s", dbPath)
+			// Set storage for the scheduler
+			if err := sched.SetStorage(postgresStorage); err != nil {
+				postgresStorage.Close()
+				return nil, fmt.Errorf("failed to set scheduler storage: %w", err)
+			}
+
+			// Also set storage reference in MCP server
+			mcpServer.SetStorage(postgresStorage)
+			logger.Infof("PostgreSQL storage initialized: %s", maskConnectionString(cfg.Database.PostgresURL))
+		} else {
+			// Fallback to SQLite
+			dbPath = cfg.Database.Path
+			sqliteStorage, err := storage.NewSQLiteStorage(dbPath)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create SQLite storage: %w", err)
+			}
+
+			taskStorage = sqliteStorage
+
+			// Set storage for the scheduler
+			if err := sched.SetStorage(sqliteStorage); err != nil {
+				sqliteStorage.Close()
+				return nil, fmt.Errorf("failed to set scheduler storage: %w", err)
+			}
+
+			// Also set storage reference in MCP server
+			mcpServer.SetStorage(sqliteStorage)
+			logger.Infof("SQLite storage initialized: %s", dbPath)
+		}
 	}
 
 	// Create the application
@@ -335,14 +372,32 @@ func createApp(cfg *config.Config) (*Application, error) {
 		agentExecutor:    agentExec,
 		server:           mcpServer,
 		logger:           logger,
-		storage:          sqliteStorage,
+		storage:          taskStorage,
 		metricsCollector: metricsCollector,
 		config:           cfg,
 		dbPath:           dbPath,
+		postgresEnabled:  postgresEnabled,
 		startTime:        startTime,
 	}
 
 	return app, nil
+}
+
+// maskConnectionString masks sensitive information in connection strings
+func maskConnectionString(connStr string) string {
+	// Simple masking - replace password in connection string
+	// postgresql://user:password@host:port/db -> postgresql://user:***@host:port/db
+	if strings.Contains(connStr, "@") {
+		parts := strings.Split(connStr, "@")
+		if len(parts) == 2 {
+			userParts := strings.Split(parts[0], ":")
+			if len(userParts) >= 2 {
+				return userParts[0] + ":***@" + parts[1]
+			}
+		}
+	}
+
+	return connStr
 }
 
 // Start starts the application with enhanced logging and monitoring
@@ -370,7 +425,11 @@ func (a *Application) Start(ctx context.Context) error {
 	a.logger.Infof("Task scheduler started")
 
 	if a.storage != nil {
-		a.logger.Infof("SQLite persistence enabled at: %s", a.dbPath)
+		if a.postgresEnabled {
+			a.logger.Infof("PostgreSQL persistence enabled")
+		} else {
+			a.logger.Infof("SQLite persistence enabled at: %s", a.dbPath)
+		}
 	}
 
 	// Start the MCP server

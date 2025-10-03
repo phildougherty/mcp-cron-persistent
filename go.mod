@@ -4,6 +4,7 @@ go 1.23.0
 
 require (
 	github.com/ThinkInAIXYZ/go-mcp v0.1.14
+	github.com/lib/pq v1.10.9
 	github.com/robfig/cron/v3 v3.0.1
 	modernc.org/sqlite v1.33.1
 )

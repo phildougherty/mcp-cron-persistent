@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -102,6 +103,7 @@ type MCPServer struct {
 	cmdExecutor      *command.CommandExecutor
 	agentExecutor    *agent.AgentExecutor
 	server           *server.Server
+	httpServer       *http.Server
 	address          string
 	port             int
 	stopCh           chan struct{}
@@ -219,6 +221,27 @@ func NewMCPServer(cfg *config.Config, scheduler *scheduler.Scheduler, cmdExecuto
 		return nil, errors.Internal(fmt.Errorf("failed to create MCP server: %w", err))
 	}
 
+	// Set up health check server for SSE transport mode
+	logger.Infof("DEBUG: Transport mode is %s", cfg.Server.TransportMode)
+	if cfg.Server.TransportMode == "sse" {
+		healthPort := cfg.Server.Port + 1000
+		healthAddr := fmt.Sprintf("%s:%d", cfg.Server.Address, healthPort)
+		logger.Infof("Setting up health check endpoints on %s", healthAddr)
+		
+		mux := http.NewServeMux()
+		mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+			mcpServer.handleHTTPHealthCheck(w, r)
+		})
+		mux.HandleFunc("/ready", func(w http.ResponseWriter, r *http.Request) {
+			mcpServer.handleHTTPReadinessCheck(w, r)
+		})
+		
+		mcpServer.httpServer = &http.Server{
+			Addr:    healthAddr,
+			Handler: mux,
+		}
+	}
+
 	return mcpServer, nil
 }
 
@@ -236,6 +259,18 @@ func (s *MCPServer) Start(ctx context.Context) error {
 			return
 		}
 	}()
+
+	// Start health check server if available
+	if s.httpServer != nil {
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			s.logger.Infof("Starting health check server on %s", s.httpServer.Addr)
+			if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				s.logger.Errorf("Error running health check server: %v", err)
+			}
+		}()
+	}
 
 	// Listen for context cancellation
 	go func() {
@@ -410,8 +445,16 @@ func (s *MCPServer) Stop() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
+	// Stop the MCP server
 	if err := s.server.Shutdown(ctx); err != nil {
 		return errors.Internal(fmt.Errorf("error shutting down MCP server: %w", err))
+	}
+
+	// Stop the health check server
+	if s.httpServer != nil {
+		if err := s.httpServer.Shutdown(ctx); err != nil {
+			s.logger.Errorf("Error shutting down health check server: %v", err)
+		}
 	}
 
 	// Only close stopCh if it hasn't been closed yet
@@ -1108,4 +1151,99 @@ func (s *MCPServer) generateTaskName(content string) string {
 	}
 
 	return name
+}
+
+// handleHTTPHealthCheck handles liveness probe requests
+func (s *MCPServer) handleHTTPHealthCheck(w http.ResponseWriter, r *http.Request) {
+	// Check if the server is running and not shutting down
+	s.shutdownMutex.Lock()
+	isShuttingDown := s.isShuttingDown
+	s.shutdownMutex.Unlock()
+
+	if isShuttingDown {
+		http.Error(w, "Server is shutting down", http.StatusServiceUnavailable)
+		return
+	}
+
+	// Check if scheduler is running
+	if s.scheduler == nil {
+		http.Error(w, "Scheduler not initialized", http.StatusServiceUnavailable)
+		return
+	}
+
+	// Return healthy status
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	response := map[string]interface{}{
+		"status": "healthy",
+		"timestamp": time.Now().Format(time.RFC3339),
+		"version": "0.2.0",
+		"components": map[string]string{
+			"scheduler": "healthy",
+			"server": "healthy",
+		},
+	}
+	json.NewEncoder(w).Encode(response)
+}
+
+// handleHTTPReadinessCheck handles readiness probe requests
+func (s *MCPServer) handleHTTPReadinessCheck(w http.ResponseWriter, r *http.Request) {
+	// Check if the server is ready to serve requests
+	s.shutdownMutex.Lock()
+	isShuttingDown := s.isShuttingDown
+	s.shutdownMutex.Unlock()
+
+	if isShuttingDown {
+		http.Error(w, "Server is shutting down", http.StatusServiceUnavailable)
+		return
+	}
+
+	// Check if all components are ready
+	isReady := true
+	components := make(map[string]string)
+
+	// Check scheduler
+	if s.scheduler == nil {
+		isReady = false
+		components["scheduler"] = "not ready"
+	} else {
+		components["scheduler"] = "ready"
+	}
+
+	// Check MCP server
+	if s.server == nil {
+		isReady = false
+		components["server"] = "not ready"
+	} else {
+		components["server"] = "ready"
+	}
+
+	// Check storage if enabled
+	if s.storage != nil {
+		// Try a simple operation to verify storage is accessible
+		_, err := s.storage.LoadAllTasks()
+		if err != nil {
+			isReady = false
+			components["storage"] = "not ready"
+		} else {
+			components["storage"] = "ready"
+		}
+	}
+
+	// Return appropriate status
+	status := http.StatusOK
+	statusText := "ready"
+	if !isReady {
+		status = http.StatusServiceUnavailable
+		statusText = "not ready"
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	response := map[string]interface{}{
+		"status": statusText,
+		"timestamp": time.Now().Format(time.RFC3339),
+		"components": components,
+	}
+	json.NewEncoder(w).Encode(response)
 }

@@ -79,6 +79,10 @@ type DatabaseConfig struct {
 	Path string
 	// Enable database persistence
 	Enabled bool
+	// PostgreSQL connection URL
+	PostgresURL string
+	// Enable PostgreSQL instead of SQLite
+	PostgresEnabled bool
 }
 
 // OllamaConfig holds Ollama configuration
@@ -292,6 +296,12 @@ func FromEnv(cfg *Config) {
 	}
 	if enabled := os.Getenv("MCP_CRON_DATABASE_ENABLED"); enabled != "" {
 		cfg.Database.Enabled = enabled == "true"
+	}
+	if postgresURL := os.Getenv("MCP_CRON_POSTGRES_URL"); postgresURL != "" {
+		cfg.Database.PostgresURL = postgresURL
+	}
+	if postgresEnabled := os.Getenv("MCP_CRON_POSTGRES_ENABLED"); postgresEnabled != "" {
+		cfg.Database.PostgresEnabled = postgresEnabled == "true"
 	}
 
 	// Ollama configuration
