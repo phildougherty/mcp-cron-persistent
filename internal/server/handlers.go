@@ -26,8 +26,11 @@ type UnifiedTaskParams struct {
 
 // ChatContext holds chat session information passed from mcp-compose
 type ChatContext struct {
-	SessionID    string
+	SessionID  string
 	OutputToChat bool
+	Provider   string
+	Model      string
+	MCPServers []string
 }
 
 // extractParams extracts parameters from a tool request
@@ -53,6 +56,23 @@ func extractChatContext(request *protocol.CallToolRequest) *ChatContext {
 
 	if outputToChat, ok := rawArgs["_output_to_chat"].(bool); ok {
 		context.OutputToChat = outputToChat
+	}
+
+	if provider, ok := rawArgs["_provider"].(string); ok {
+		context.Provider = provider
+	}
+
+	if model, ok := rawArgs["_model"].(string); ok {
+		context.Model = model
+	}
+
+	if mcpServers, ok := rawArgs["_mcp_servers"].([]interface{}); ok {
+		context.MCPServers = make([]string, 0, len(mcpServers))
+		for _, server := range mcpServers {
+			if serverStr, ok := server.(string); ok {
+				context.MCPServers = append(context.MCPServers, serverStr)
+			}
+		}
 	}
 
 	if context.SessionID == "" && !context.OutputToChat {

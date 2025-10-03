@@ -2,10 +2,13 @@
 package storage
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"os"
 	"time"
 
 	"mcp-cron-persistent/internal/model"
@@ -427,6 +430,9 @@ func (s *PostgresStorage) DeleteTaskMemory(taskID, key string) error {
 
 // SaveTaskResult saves a task execution result (for scheduler.Storage interface)
 func (s *PostgresStorage) SaveTaskResult(result *model.Result) error {
+	fmt.Printf("[DEBUG] SaveTaskResult: TaskID=%s, Output=%q, Error=%q, ExitCode=%d\n",
+		result.TaskID, result.Output, result.Error, result.ExitCode)
+
 	return s.RecordTaskRun(
 		result.TaskID,
 		result.Output,
@@ -464,7 +470,64 @@ func (s *PostgresStorage) RecordTaskRun(taskID, output, errorMsg string, exitCod
 		return fmt.Errorf("failed to record task run: %w", err)
 	}
 
+	s.postTaskResultToChat(ctx, taskID, runID, output, errorMsg, status)
+
 	return nil
+}
+
+func (s *PostgresStorage) postTaskResultToChat(ctx context.Context, taskID, runID, output, errorMsg, status string) {
+	var chatSessionID string
+	var outputToChat bool
+
+	query := `SELECT chat_session_id, output_to_chat FROM task_scheduler.scheduler_tasks WHERE id = $1`
+	err := s.db.QueryRowContext(ctx, query, taskID).Scan(&chatSessionID, &outputToChat)
+
+	if err != nil || !outputToChat || chatSessionID == "" {
+		return
+	}
+
+	content := output
+	if status == "failed" && errorMsg != "" {
+		content = fmt.Sprintf("Task failed with error:\n%s", errorMsg)
+	}
+
+	dashboardURL := os.Getenv("DASHBOARD_INTERNAL_URL")
+	if dashboardURL == "" {
+		dashboardURL = os.Getenv("MCP_COMPOSE_DASHBOARD_URL")
+	}
+	if dashboardURL == "" {
+		dashboardURL = "http://mcp-compose-dashboard:3001"
+	}
+
+	payload := map[string]interface{}{
+		"session_id":       chatSessionID,
+		"role":             "assistant",
+		"content":          content,
+		"is_automated":     true,
+		"from_task_run_id": runID,
+	}
+
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return
+	}
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Post(
+		fmt.Sprintf("%s/api/internal/task-output", dashboardURL),
+		"application/json",
+		bytes.NewBuffer(data),
+	)
+
+	if err != nil {
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusOK {
+		updateQuery := `UPDATE task_scheduler.scheduler_task_runs SET posted_to_chat = true WHERE id = $1`
+		s.db.ExecContext(ctx, updateQuery, runID)
+	}
 }
 
 // Conversation-related methods for backward compatibility

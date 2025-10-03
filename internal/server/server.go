@@ -742,6 +742,18 @@ func applyChatContext(task *model.Task, chatCtx *ChatContext) {
 	}
 
 	task.OutputToChat = chatCtx.OutputToChat
+
+	if chatCtx.Provider != "" && task.Provider == "" {
+		task.Provider = chatCtx.Provider
+	}
+
+	if chatCtx.Model != "" && task.Model == "" {
+		task.Model = chatCtx.Model
+	}
+
+	if len(chatCtx.MCPServers) > 0 && len(task.MCPServers) == 0 {
+		task.MCPServers = chatCtx.MCPServers
+	}
 }
 
 // handleUpdateTask updates an existing task

@@ -524,11 +524,29 @@ func (s *Scheduler) executeTaskWithObservability(task *model.Task) {
 			})
 	}
 
+	if resultProvider, ok := s.taskExecutor.(model.ResultProvider); ok {
+		if executorResult, found := resultProvider.GetTaskResult(task.ID); found && executorResult != nil {
+			fmt.Printf("[DEBUG] Got result from executor: Output=%q\n", executorResult.Output)
+			result.Output = executorResult.Output
+			result.Command = executorResult.Command
+			result.Prompt = executorResult.Prompt
+			if executorResult.Error != "" {
+				result.Error = executorResult.Error
+			}
+		} else {
+			fmt.Printf("[DEBUG] No result found from executor for task %s\n", task.ID)
+		}
+	} else {
+		fmt.Printf("[DEBUG] taskExecutor does not implement ResultProvider\n")
+	}
+
 	result.EndTime = time.Now()
 	result.Duration = result.EndTime.Sub(result.StartTime).String()
 	task.UpdatedAt = time.Now()
 	s.updateNextRunTime(task)
 	s.saveTaskToStorage(task)
+
+	fmt.Printf("[DEBUG] About to save result: TaskID=%s, Output=%q\n", result.TaskID, result.Output)
 
 	// Save execution result if storage is available
 	if s.storage != nil {
