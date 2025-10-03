@@ -94,7 +94,11 @@ func (s *PostgresStorage) createTask(ctx context.Context, task *model.Task) erro
 
 	var mcpServersJSON interface{}
 	if len(task.MCPServers) > 0 {
-		mcpServersJSON = task.MCPServers
+		jsonData, err := json.Marshal(task.MCPServers)
+		if err != nil {
+			return fmt.Errorf("failed to marshal mcp_servers: %w", err)
+		}
+		mcpServersJSON = jsonData
 	}
 
 	userID := task.UserID
@@ -133,7 +137,9 @@ func (s *PostgresStorage) updateTask(ctx context.Context, task *model.Task) erro
 			prompt = $7, schedule = $8, status = $9, updated_at = $10,
 			conversation_id = $11, conversation_name = $12, conversation_context = $13,
 			is_agent = $14, agent_personality = $15, memory_summary = $16,
-			last_memory_update = $17, last_run = $18, next_run = $19
+			last_memory_update = $17, last_run = $18, next_run = $19, chat_session_id = $20,
+			output_to_chat = $21, inherit_session_context = $22, provider = $23, model = $24,
+			mcp_servers = $25
 		WHERE id = $1`
 
 	var lastRun, nextRun interface{}
@@ -144,12 +150,23 @@ func (s *PostgresStorage) updateTask(ctx context.Context, task *model.Task) erro
 		nextRun = task.NextRun
 	}
 
+	var mcpServersJSON interface{}
+	if len(task.MCPServers) > 0 {
+		jsonData, err := json.Marshal(task.MCPServers)
+		if err != nil {
+			return fmt.Errorf("failed to marshal mcp_servers: %w", err)
+		}
+		mcpServersJSON = jsonData
+	}
+
 	_, err := s.db.ExecContext(ctx, query,
 		task.ID, task.Name, task.Description, task.Type, task.Enabled,
 		task.Command, task.Prompt, task.Schedule, task.Status, task.UpdatedAt,
 		task.ConversationID, task.ConversationName, task.ConversationContext,
 		task.IsAgent, task.AgentPersonality, task.MemorySummary,
 		task.LastMemoryUpdate, lastRun, nextRun,
+		task.ChatSessionID, task.OutputToChat, task.InheritSessionContext,
+		task.Provider, task.Model, mcpServersJSON,
 	)
 
 	if err != nil {
