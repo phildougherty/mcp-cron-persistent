@@ -14,7 +14,7 @@ type TaskStatus string
 
 // Task types
 const (
-	TypeShellCommand TaskType = "shell_command"
+	TypeShellCommand TaskType = "shell"
 	TypeAI           TaskType = "AI"
 )
 
