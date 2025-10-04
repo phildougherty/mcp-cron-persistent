@@ -450,24 +450,49 @@ func (s *PostgresStorage) SaveTaskResult(result *model.Result) error {
 	fmt.Printf("[DEBUG] SaveTaskResult: TaskID=%s, Output=%q, Error=%q, ExitCode=%d\n",
 		result.TaskID, result.Output, result.Error, result.ExitCode)
 
+	ctx := context.Background()
+	runID := fmt.Sprintf("run_%s_%d", result.TaskID, time.Now().Unix())
+	status := "completed"
+	if result.ExitCode != 0 {
+		status = "failed"
+	}
+
 	return s.RecordTaskRun(
+		ctx,
+		runID,
 		result.TaskID,
+		result.StartTime,
+		result.EndTime,
 		result.Output,
 		result.Error,
 		result.ExitCode,
-		result.StartTime,
-		result.EndTime,
+		status,
+		"scheduler",
 	)
 }
 
 // RecordTaskRun saves a task execution result
-func (s *PostgresStorage) RecordTaskRun(taskID, output, errorMsg string, exitCode int, startTime, endTime time.Time) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+func (s *PostgresStorage) RecordTaskRun(ctx context.Context, runID, taskID string, startTime, endTime time.Time, output, errorMsg string, exitCode int, status, trigger string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	ctxWithTimeout, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	status := "completed"
-	if exitCode != 0 {
-		status = "failed"
+	if status == "" {
+		status = "completed"
+		if exitCode != 0 {
+			status = "failed"
+		}
+	}
+
+	if trigger == "" {
+		trigger = "scheduler"
+	}
+
+	if runID == "" {
+		runID = fmt.Sprintf("run_%s_%d", taskID, time.Now().Unix())
 	}
 
 	query := `
@@ -476,18 +501,16 @@ func (s *PostgresStorage) RecordTaskRun(taskID, output, errorMsg string, exitCod
 			exit_code, status, triggered_by
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`
 
-	runID := fmt.Sprintf("run_%s_%d", taskID, time.Now().Unix())
-
-	_, err := s.db.ExecContext(ctx, query,
+	_, err := s.db.ExecContext(ctxWithTimeout, query,
 		runID, taskID, startTime, endTime, output, errorMsg,
-		exitCode, status, "scheduler",
+		exitCode, status, trigger,
 	)
 
 	if err != nil {
 		return fmt.Errorf("failed to record task run: %w", err)
 	}
 
-	s.postTaskResultToChat(ctx, taskID, runID, output, errorMsg, status)
+	s.postTaskResultToChat(ctxWithTimeout, taskID, runID, output, errorMsg, status)
 
 	return nil
 }

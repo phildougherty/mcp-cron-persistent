@@ -23,6 +23,7 @@ type Storage interface {
 	LoadAllTasks() ([]*model.Task, error)
 	DeleteTask(id string) error
 	SaveTaskResult(result *model.Result) error
+	RecordTaskRun(ctx context.Context, runID, taskID string, startTime, endTime time.Time, output, errorMsg string, exitCode int, status, trigger string) error
 	Close() error
 }
 

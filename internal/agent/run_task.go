@@ -177,9 +177,12 @@ func tryOpenRouterExecution(ctx context.Context, task *model.Task, model string,
 		}
 	}
 
-	// Fallback: Since OpenRouter without tools isn't fully implemented,
-	// return a descriptive response about what would be processed
-	return fmt.Sprintf("Task processed by OpenRouter (%s): %s", model, task.Prompt), nil
+	output, err := client.Chat(timeoutCtx, task.Prompt, model)
+	if err != nil {
+		return "", fmt.Errorf("openRouter execution failed: %w", err)
+	}
+
+	return output, nil
 }
 
 // buildSystemPrompt creates an enhanced system prompt for the task

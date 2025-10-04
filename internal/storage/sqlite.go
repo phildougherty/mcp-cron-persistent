@@ -2,6 +2,7 @@
 package storage
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -627,6 +628,11 @@ func (s *SQLiteStorage) LoadTaskMemory(taskID string) (map[string]string, error)
 		memory[key] = value
 	}
 	return memory, rows.Err()
+}
+
+// RecordTaskRun is a no-op for SQLite (not implemented)
+func (s *SQLiteStorage) RecordTaskRun(ctx context.Context, runID, taskID string, startTime, endTime time.Time, output, errorMsg string, exitCode int, status, trigger string) error {
+	return nil
 }
 
 // Helper functions

@@ -98,6 +98,31 @@ func NewClient(apiKey string, logger *logging.Logger) *Client {
 	}
 }
 
+func (c *Client) Chat(ctx context.Context, prompt, model string) (string, error) {
+	messages := []Message{
+		{
+			Role:    "user",
+			Content: prompt,
+		},
+	}
+
+	req := ChatRequest{
+		Model:    model,
+		Messages: messages,
+	}
+
+	resp, err := c.sendRequest(ctx, req)
+	if err != nil {
+		return "", err
+	}
+
+	if len(resp.Choices) == 0 {
+		return "", fmt.Errorf("no response from OpenRouter")
+	}
+
+	return resp.Choices[0].Message.Content, nil
+}
+
 func (c *Client) ExecuteAITaskWithTools(ctx context.Context, prompt, model string, tools []Tool, toolProxy *ToolProxy) (string, error) {
 	taskId := ctx.Value("task_id")
 	if taskId == nil {

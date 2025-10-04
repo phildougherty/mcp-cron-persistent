@@ -344,9 +344,25 @@ func (s *MCPServer) handleRunTask(request *protocol.CallToolRequest) (*protocol.
 	endTime := time.Now()
 	duration := endTime.Sub(startTime)
 
+	// Get execution result
+	var output string
+	var errorMsg string
+	var exitCode int
+	var status string
+
+	if executorResult, exists := s.GetTaskResult(task.ID); exists {
+		output = executorResult.Output
+		exitCode = executorResult.ExitCode
+	}
+
 	// Update task status based on execution outcome
 	if err != nil {
 		task.Status = model.StatusFailed
+		errorMsg = err.Error()
+		status = "failed"
+		if exitCode == 0 {
+			exitCode = 1
+		}
 		s.logger.Errorf("Task %s failed: %v", task.ID, err)
 		// Broadcast task failure
 		activity.BroadcastActivity("ERROR", "task",
@@ -360,6 +376,7 @@ func (s *MCPServer) handleRunTask(request *protocol.CallToolRequest) (*protocol.
 			})
 	} else {
 		task.Status = model.StatusCompleted
+		status = "completed"
 		s.logger.Infof("Task %s completed successfully", task.ID)
 		// Broadcast task success
 		activity.BroadcastActivity("INFO", "task",
@@ -376,6 +393,14 @@ func (s *MCPServer) handleRunTask(request *protocol.CallToolRequest) (*protocol.
 	// Update the task in scheduler (this will save to storage if available)
 	if updateErr := s.scheduler.UpdateTask(task); updateErr != nil {
 		s.logger.Errorf("Failed to update task %s after execution: %v", task.ID, updateErr)
+	}
+
+	// Record the task run to enable posting to chat
+	if s.storage != nil {
+		runID := fmt.Sprintf("%s_%d", task.ID, time.Now().UnixNano())
+		if recordErr := s.storage.RecordTaskRun(ctx, runID, task.ID, startTime, endTime, output, errorMsg, exitCode, status, "manual"); recordErr != nil {
+			s.logger.Errorf("Failed to record task run for %s: %v", task.ID, recordErr)
+		}
 	}
 
 	// Create response with execution details
