@@ -764,9 +764,10 @@ func applyChatContext(task *model.Task, chatCtx *ChatContext) {
 
 	if chatCtx.SessionID != "" {
 		task.ChatSessionID = chatCtx.SessionID
+		task.OutputToChat = true
+	} else {
+		task.OutputToChat = chatCtx.OutputToChat
 	}
-
-	task.OutputToChat = chatCtx.OutputToChat
 
 	if chatCtx.Provider != "" && task.Provider == "" {
 		task.Provider = chatCtx.Provider
