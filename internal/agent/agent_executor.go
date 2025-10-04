@@ -352,8 +352,11 @@ func (ae *AgentExecutor) executeWithOllamaLocal(ctx context.Context, task *model
 func (ae *AgentExecutor) executeWithOpenRouterIntelligent(ctx context.Context, task *model.Task, analysis *TaskAnalysis) (string, error) {
 	ae.logger.Infof("Executing task with OpenRouter: %s (reason: %s)", task.ID, analysis.Reasoning)
 
-	// Select model based on complexity
-	model := ae.selectModelForComplexity(analysis.Complexity)
+	model := task.Model
+	if model == "" {
+		model = ae.selectModelForComplexity(analysis.Complexity)
+	}
+
 	return tryOpenRouterExecution(ctx, task, model, ae.config)
 }
 

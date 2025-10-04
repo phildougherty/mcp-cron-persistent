@@ -94,7 +94,12 @@ func RunTaskWithModelRouting(ctx context.Context, task *model.Task, cfg *config.
 
 	// Prefer OpenRouter for most tasks (intelligent default)
 	if cfg.OpenRouter.Enabled && cfg.OpenRouter.APIKey != "" {
-		result, err := tryOpenRouterExecution(ctx, task, cfg.OpenRouter.DefaultModel, cfg)
+		model := task.Model
+		if model == "" {
+			model = cfg.OpenRouter.DefaultModel
+		}
+
+		result, err := tryOpenRouterExecution(ctx, task, model, cfg)
 		if err == nil {
 			return result, nil
 		}
