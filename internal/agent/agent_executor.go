@@ -207,28 +207,43 @@ func (ae *AgentExecutor) executeAgentTaskEnhanced(
 	defer cancel()
 	execCtx = context.WithValue(execCtx, TaskIDKey, taskID)
 
-	// Analyze the task for intelligent routing
-	analysis := ae.analyzeTask(task, memory)
-
-	// Execute the task using intelligent routing based on analysis
+	// Check if task has explicit provider configuration (from chat session inheritance)
 	var output string
 	var err error
 	var modelUsed string
+	var analysis *TaskAnalysis
 
-	switch analysis.PreferredProvider {
-	case "ollama":
-		output, err = ae.executeWithOllamaLocal(execCtx, task, analysis)
-		modelUsed = ae.config.Ollama.DefaultModel
-	case "openrouter":
-		output, err = ae.executeWithOpenRouterIntelligent(execCtx, task, analysis)
-		modelUsed = ae.config.OpenRouter.DefaultModel
-	case "openwebui":
-		output, err = ae.executeWithOpenWebUI(execCtx, task, analysis)
-		modelUsed = ae.config.OpenWebUI.Model
-	default:
-		// Fallback to standard execution
-		output, err = RunTask(execCtx, task, ae.config)
-		modelUsed = "standard"
+	if task.Provider != "" {
+		ae.logger.Infof("Using task-configured provider: %s with model: %s", task.Provider, task.Model)
+		analysis = ae.analyzeTask(task, memory)
+
+		switch task.Provider {
+		case "ollama":
+			output, err = ae.executeWithOllamaLocal(execCtx, task, analysis)
+			modelUsed = task.Model
+			if modelUsed == "" {
+				modelUsed = ae.config.Ollama.DefaultModel
+			}
+		case "openrouter":
+			output, err = ae.executeWithOpenRouterIntelligent(execCtx, task, analysis)
+			modelUsed = task.Model
+			if modelUsed == "" {
+				modelUsed = ae.config.OpenRouter.DefaultModel
+			}
+		case "openwebui":
+			output, err = ae.executeWithOpenWebUI(execCtx, task, analysis)
+			modelUsed = task.Model
+			if modelUsed == "" {
+				modelUsed = ae.config.OpenWebUI.Model
+			}
+		default:
+			ae.logger.Warningf("Unknown provider '%s', falling back to intelligent routing", task.Provider)
+			output, err, modelUsed = ae.executeWithIntelligentRouting(execCtx, task, analysis)
+		}
+	} else {
+		ae.logger.Infof("No task-configured provider, using intelligent routing")
+		analysis = ae.analyzeTask(task, memory)
+		output, err, modelUsed = ae.executeWithIntelligentRouting(execCtx, task, analysis)
 	}
 
 	// Update result fields
@@ -358,6 +373,30 @@ func (ae *AgentExecutor) executeWithOpenRouterIntelligent(ctx context.Context, t
 	}
 
 	return tryOpenRouterExecution(ctx, task, model, ae.config)
+}
+
+// executeWithIntelligentRouting uses intelligent analysis to select the best provider
+func (ae *AgentExecutor) executeWithIntelligentRouting(ctx context.Context, task *model.Task, analysis *TaskAnalysis) (string, error, string) {
+	var output string
+	var err error
+	var modelUsed string
+
+	switch analysis.PreferredProvider {
+	case "ollama":
+		output, err = ae.executeWithOllamaLocal(ctx, task, analysis)
+		modelUsed = ae.config.Ollama.DefaultModel
+	case "openrouter":
+		output, err = ae.executeWithOpenRouterIntelligent(ctx, task, analysis)
+		modelUsed = ae.config.OpenRouter.DefaultModel
+	case "openwebui":
+		output, err = ae.executeWithOpenWebUI(ctx, task, analysis)
+		modelUsed = ae.config.OpenWebUI.Model
+	default:
+		output, err = RunTask(ctx, task, ae.config)
+		modelUsed = "standard"
+	}
+
+	return output, err, modelUsed
 }
 
 // executeWithOpenWebUI executes with OpenWebUI
