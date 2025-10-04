@@ -237,7 +237,7 @@ func (ae *AgentExecutor) executeAgentTaskEnhanced(
 				modelUsed = ae.config.OpenWebUI.Model
 			}
 		default:
-			ae.logger.Warningf("Unknown provider '%s', falling back to intelligent routing", task.Provider)
+			ae.logger.Infof("Unknown provider '%s', falling back to intelligent routing", task.Provider)
 			output, err, modelUsed = ae.executeWithIntelligentRouting(execCtx, task, analysis)
 		}
 	} else {
