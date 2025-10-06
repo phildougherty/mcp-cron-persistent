@@ -773,7 +773,6 @@ func applyChatContext(task *model.Task, chatCtx *ChatContext) {
 
 	if chatCtx.SessionID != "" {
 		task.ChatSessionID = chatCtx.SessionID
-		task.OutputToChat = chatCtx.OutputToChat
 	}
 
 	if chatCtx.Provider != "" && task.Provider == "" {
