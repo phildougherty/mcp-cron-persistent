@@ -64,6 +64,80 @@ func (tp *ToolProxy) GetTools() []Tool {
 	return tp.tools
 }
 
+func (tp *ToolProxy) LoadToolsFromServers(ctx context.Context, serverNames []string) error {
+	var allTools []Tool
+
+	for _, serverName := range serverNames {
+		url := fmt.Sprintf("%s/%s", tp.proxyURL, serverName)
+
+		reqBody := map[string]interface{}{
+			"jsonrpc": "2.0",
+			"method":  "tools/list",
+			"params":  map[string]interface{}{},
+			"id":      1,
+		}
+
+		jsonData, err := json.Marshal(reqBody)
+		if err != nil {
+			return fmt.Errorf("failed to marshal request for server %s: %w", serverName, err)
+		}
+
+		req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonData))
+		if err != nil {
+			return fmt.Errorf("failed to create request for server %s: %w", serverName, err)
+		}
+
+		req.Header.Set("Content-Type", "application/json")
+		if tp.apiKey != "" {
+			req.Header.Set("Authorization", "Bearer "+tp.apiKey)
+		}
+
+		resp, err := tp.httpClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("failed to fetch tools from server %s: %w", serverName, err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			bodyBytes, _ := io.ReadAll(resp.Body)
+			return fmt.Errorf("server %s returned status %d: %s", serverName, resp.StatusCode, string(bodyBytes))
+		}
+
+		var result struct {
+			Result struct {
+				Tools []map[string]interface{} `json:"tools"`
+			} `json:"result"`
+		}
+
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			return fmt.Errorf("failed to decode response from server %s: %w", serverName, err)
+		}
+
+		for _, mcpTool := range result.Result.Tools {
+			name, _ := mcpTool["name"].(string)
+			desc, _ := mcpTool["description"].(string)
+			inputSchema, _ := mcpTool["inputSchema"].(map[string]interface{})
+
+			if name != "" {
+				fullToolName := fmt.Sprintf("mcp_%s_%s", serverName, name)
+
+				tool := Tool{
+					Type: "function",
+					Function: Function{
+						Name:        fullToolName,
+						Description: desc,
+						Parameters:  inputSchema,
+					},
+				}
+				allTools = append(allTools, tool)
+			}
+		}
+	}
+
+	tp.tools = allTools
+	return nil
+}
+
 func (tp *ToolProxy) ExecuteTool(ctx context.Context, toolName string, arguments interface{}) (string, error) {
 	var args map[string]interface{}
 

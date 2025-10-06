@@ -29,22 +29,29 @@ func RunTask(ctx context.Context, t *model.Task, cfg *config.Config) (string, er
 func runTaskWithOpenRouter(ctx context.Context, t *model.Task, cfg *config.Config, logger *logging.Logger) (string, error) {
 	logger.Infof("Running AI task: %s via OpenRouter", t.Name)
 
-	// Create OpenRouter client
 	client := openrouter.NewClient(cfg.OpenRouter.APIKey, logger)
 
-	// Create tool proxy
 	toolProxy := openrouter.NewToolProxy(cfg.OpenRouter.MCPProxyURL, cfg.OpenRouter.MCPProxyKey)
 
-	// Load available tools
-	if err := toolProxy.LoadTools(ctx); err != nil {
+	var tools []openrouter.Tool
+	var err error
+
+	if len(t.MCPServers) > 0 {
+		logger.Infof("Loading tools from specific MCP servers: %v", t.MCPServers)
+		err = toolProxy.LoadToolsFromServers(ctx, t.MCPServers)
+	} else {
+		logger.Infof("Loading tools from all MCP servers")
+		err = toolProxy.LoadTools(ctx)
+	}
+
+	if err != nil {
 		logger.Errorf("Failed to load tools: %v", err)
 		return "", err
 	}
 
-	tools := toolProxy.GetTools()
+	tools = toolProxy.GetTools()
 	logger.Infof("Loaded %d tools from MCP proxy", len(tools))
 
-	// Execute task with tools
 	result, err := client.ExecuteAITaskWithTools(ctx, t.Prompt, cfg.OpenRouter.DefaultModel, tools, toolProxy)
 	if err != nil {
 		logger.Errorf("Failed to execute AI task via OpenRouter: %v", err)
@@ -154,32 +161,58 @@ func tryOllamaExecution(ctx context.Context, task *model.Task, cfg *config.Confi
 }
 
 func tryOpenRouterExecution(ctx context.Context, task *model.Task, model string, cfg *config.Config) (string, error) {
-	// Create OpenRouter client
-	client := openrouter.NewClient(cfg.OpenRouter.APIKey, nil)
+	logger := logging.GetDefaultLogger().WithField("task_id", task.ID)
 
-	// Create timeout context
+	client := openrouter.NewClient(cfg.OpenRouter.APIKey, logger)
+
 	timeoutCtx, cancel := context.WithTimeout(ctx, time.Duration(cfg.OpenRouter.RequestTimeout)*time.Second)
 	defer cancel()
 
-	// Load tools if MCP proxy is configured
 	var tools []openrouter.Tool
-	if cfg.OpenRouter.MCPProxyURL != "" {
+	requiresMCPTools := len(task.MCPServers) > 0
+
+	if cfg.OpenRouter.MCPProxyURL != "" && requiresMCPTools {
 		toolProxy := openrouter.NewToolProxy(cfg.OpenRouter.MCPProxyURL, cfg.OpenRouter.MCPProxyKey)
-		if err := toolProxy.LoadTools(timeoutCtx); err != nil {
-			// Log warning but continue without tools
-			fmt.Printf("Warning: Failed to load MCP tools: %v\n", err)
-		} else {
-			tools = toolProxy.GetTools()
+
+		logger.Infof("Task requires specific MCP servers: %v", task.MCPServers)
+
+		if err := toolProxy.LoadToolsFromServers(timeoutCtx, task.MCPServers); err != nil {
+			return "", fmt.Errorf("failed to load tools from MCP servers %v: %w", task.MCPServers, err)
 		}
 
-		// Execute with tools if available
-		if len(tools) > 0 {
-			output, err := client.ExecuteAITaskWithTools(timeoutCtx, task.Prompt, model, tools, toolProxy)
-			if err != nil {
-				return "", fmt.Errorf("openRouter execution with tools failed: %w", err)
-			}
-			return output, nil
+		tools = toolProxy.GetTools()
+		if len(tools) == 0 {
+			return "", fmt.Errorf("no tools loaded from MCP servers %v", task.MCPServers)
 		}
+
+		logger.Infof("Loaded %d tools from MCP servers %v", len(tools), task.MCPServers)
+
+		output, err := client.ExecuteAITaskWithTools(timeoutCtx, task.Prompt, model, tools, toolProxy)
+		if err != nil {
+			return "", fmt.Errorf("openRouter execution with tools failed: %w", err)
+		}
+
+		return output, nil
+	} else if cfg.OpenRouter.MCPProxyURL != "" {
+		toolProxy := openrouter.NewToolProxy(cfg.OpenRouter.MCPProxyURL, cfg.OpenRouter.MCPProxyKey)
+
+		if err := toolProxy.LoadTools(timeoutCtx); err != nil {
+			logger.Warnf("Failed to load MCP tools: %v", err)
+		} else {
+			tools = toolProxy.GetTools()
+			if len(tools) > 0 {
+				logger.Infof("Loaded %d tools from MCP proxy", len(tools))
+
+				output, err := client.ExecuteAITaskWithTools(timeoutCtx, task.Prompt, model, tools, toolProxy)
+				if err != nil {
+					return "", fmt.Errorf("openRouter execution with tools failed: %w", err)
+				}
+
+				return output, nil
+			}
+		}
+	} else if requiresMCPTools {
+		return "", fmt.Errorf("task requires MCP servers %v but MCP proxy URL is not configured", task.MCPServers)
 	}
 
 	output, err := client.Chat(timeoutCtx, task.Prompt, model)

@@ -3,6 +3,7 @@ package config
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -330,9 +331,15 @@ func FromEnv(cfg *Config) {
 	}
 	if proxyURL := os.Getenv("MCP_CRON_OPENROUTER_MCP_PROXY_URL"); proxyURL != "" {
 		cfg.OpenRouter.MCPProxyURL = proxyURL
+	} else if proxyURL := os.Getenv("MCP_PROXY_URL"); proxyURL != "" {
+		cfg.OpenRouter.MCPProxyURL = proxyURL
+		log.Printf("[INFO] Using MCP_PROXY_URL for task scheduler: %s", proxyURL)
 	}
 	if proxyKey := os.Getenv("MCP_CRON_OPENROUTER_MCP_PROXY_KEY"); proxyKey != "" {
 		cfg.OpenRouter.MCPProxyKey = proxyKey
+	} else if proxyKey := os.Getenv("MCP_PROXY_API_KEY"); proxyKey != "" {
+		cfg.OpenRouter.MCPProxyKey = proxyKey
+		log.Printf("[INFO] Using MCP_PROXY_API_KEY for task scheduler")
 	}
 	if enabled := os.Getenv("MCP_CRON_OPENROUTER_ENABLED"); enabled != "" {
 		cfg.OpenRouter.Enabled = enabled == "true"

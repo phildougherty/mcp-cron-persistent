@@ -742,30 +742,37 @@ func createBaseTask(name, schedule, description string, enabled bool) *model.Tas
 	now := time.Now()
 	taskID := fmt.Sprintf("task_%d", now.UnixNano())
 
-	return &model.Task{
-		ID:          taskID,
-		Name:        name,
-		Schedule:    schedule,
-		Description: description,
-		Enabled:     enabled,
-		Status:      model.StatusPending,
-		LastRun:     now,
-		NextRun:     now,
-		CreatedAt:   now,
-		UpdatedAt:   now,
+	task := &model.Task{
+		ID:           taskID,
+		Name:         name,
+		Schedule:     schedule,
+		Description:  description,
+		Enabled:      enabled,
+		Status:       model.StatusPending,
+		OutputToChat: true,
+		LastRun:      now,
+		NextRun:      now,
+		CreatedAt:    now,
+		UpdatedAt:    now,
 	}
+	fmt.Printf("[DEBUG] createBaseTask: TaskID=%s, OutputToChat=%v\n", task.ID, task.OutputToChat)
+	return task
 }
 
 // applyChatContext applies chat context to a task if available
 func applyChatContext(task *model.Task, chatCtx *ChatContext) {
 	if chatCtx == nil {
+		fmt.Printf("[DEBUG] applyChatContext: chatCtx is nil for task %s\n", task.ID)
 		return
 	}
 
+	fmt.Printf("[DEBUG] applyChatContext: BEFORE - TaskID=%s, ChatSessionID=%s, OutputToChat=%v\n",
+		task.ID, task.ChatSessionID, task.OutputToChat)
+	fmt.Printf("[DEBUG] applyChatContext: ChatContext - SessionID=%s, OutputToChat=%v\n",
+		chatCtx.SessionID, chatCtx.OutputToChat)
+
 	if chatCtx.SessionID != "" {
 		task.ChatSessionID = chatCtx.SessionID
-		task.OutputToChat = true
-	} else {
 		task.OutputToChat = chatCtx.OutputToChat
 	}
 
@@ -780,6 +787,9 @@ func applyChatContext(task *model.Task, chatCtx *ChatContext) {
 	if len(chatCtx.MCPServers) > 0 && len(task.MCPServers) == 0 {
 		task.MCPServers = chatCtx.MCPServers
 	}
+
+	fmt.Printf("[DEBUG] applyChatContext: AFTER - TaskID=%s, ChatSessionID=%s, OutputToChat=%v, Provider=%s, Model=%s\n",
+		task.ID, task.ChatSessionID, task.OutputToChat, task.Provider, task.Model)
 }
 
 // handleUpdateTask updates an existing task

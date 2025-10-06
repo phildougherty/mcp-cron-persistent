@@ -327,6 +327,16 @@ func (s *Scheduler) RemoveTask(taskID string) error {
 
 // GetTask retrieves a task by ID
 func (s *Scheduler) GetTask(taskID string) (*model.Task, error) {
+	if s.storage != nil {
+		task, err := s.storage.LoadTask(taskID)
+		if err == nil {
+			s.mu.Lock()
+			s.tasks[taskID] = task
+			s.mu.Unlock()
+			return task, nil
+		}
+	}
+
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	task, exists := s.tasks[taskID]
