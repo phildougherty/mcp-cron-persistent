@@ -285,7 +285,12 @@ func (s *PostgresStorage) GetTask(taskID string) (*model.Task, error) {
 
 // LoadAllTasks loads all tasks from storage (alias for ListTasks for scheduler.Storage interface)
 func (s *PostgresStorage) LoadAllTasks() ([]*model.Task, error) {
-	return s.ListTasks()
+	fmt.Printf("[DEBUG] LoadAllTasks called\n")
+	tasks, err := s.ListTasks()
+	for _, task := range tasks {
+		fmt.Printf("[DEBUG] LoadAllTasks: Task=%s, Name=%s, MCPServers=%v\n", task.ID, task.Name, task.MCPServers)
+	}
+	return tasks, err
 }
 
 // ListTasks retrieves all tasks
@@ -362,9 +367,14 @@ func (s *PostgresStorage) ListTasks() ([]*model.Task, error) {
 			task.Model = model.String
 		}
 		if mcpServersJSON.Valid && mcpServersJSON.String != "" {
+			fmt.Printf("[DEBUG] ListTasks: Task=%s, mcpServersJSON=%s\n", task.ID, mcpServersJSON.String)
 			if err := json.Unmarshal([]byte(mcpServersJSON.String), &task.MCPServers); err != nil {
 				fmt.Printf("Warning: Failed to unmarshal mcp_servers for task %s: %v\n", task.ID, err)
+			} else {
+				fmt.Printf("[DEBUG] ListTasks: Task=%s, MCPServers=%v\n", task.ID, task.MCPServers)
 			}
+		} else {
+			fmt.Printf("[DEBUG] ListTasks: Task=%s, mcpServersJSON.Valid=%v, mcpServersJSON.String=%q\n", task.ID, mcpServersJSON.Valid, mcpServersJSON.String)
 		}
 
 		tasks = append(tasks, &task)
