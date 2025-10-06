@@ -272,6 +272,8 @@ func (s *PostgresStorage) GetTask(taskID string) (*model.Task, error) {
 	if createdBy.Valid {
 		task.CreatedBy = createdBy.String
 	}
+
+	fmt.Printf("[DEBUG] GetTask BEFORE check: TaskID=%s, mcpServersJSON=%v, len=%d, isNil=%v\n", task.ID, mcpServersJSON, len(mcpServersJSON), mcpServersJSON == nil)
 	if len(mcpServersJSON) > 0 {
 		fmt.Printf("[DEBUG] GetTask: TaskID=%s, mcpServersJSON=%s, len=%d\n", task.ID, string(mcpServersJSON), len(mcpServersJSON))
 		var servers []string
