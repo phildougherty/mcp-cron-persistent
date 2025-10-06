@@ -273,10 +273,16 @@ func (s *PostgresStorage) GetTask(taskID string) (*model.Task, error) {
 		task.CreatedBy = createdBy.String
 	}
 	if len(mcpServersJSON) > 0 {
+		fmt.Printf("[DEBUG] GetTask: TaskID=%s, mcpServersJSON=%s, len=%d\n", task.ID, string(mcpServersJSON), len(mcpServersJSON))
 		var servers []string
 		if err := json.Unmarshal(mcpServersJSON, &servers); err == nil {
 			task.MCPServers = servers
+			fmt.Printf("[DEBUG] GetTask: TaskID=%s, MCPServers=%v\n", task.ID, task.MCPServers)
+		} else {
+			fmt.Printf("[DEBUG] GetTask: TaskID=%s, unmarshal error: %v\n", task.ID, err)
 		}
+	} else {
+		fmt.Printf("[DEBUG] GetTask: TaskID=%s, mcpServersJSON is empty or nil\n", task.ID)
 	}
 
 	return &task, nil
