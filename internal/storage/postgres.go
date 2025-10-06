@@ -189,6 +189,7 @@ func (s *PostgresStorage) LoadTask(taskID string) (*model.Task, error) {
 
 // GetTask retrieves a task by ID
 func (s *PostgresStorage) GetTask(taskID string) (*model.Task, error) {
+	fmt.Printf("[DEBUG] GetTask called with taskID=%s\n", taskID)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
