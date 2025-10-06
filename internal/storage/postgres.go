@@ -208,7 +208,7 @@ func (s *PostgresStorage) GetTask(taskID string) (*model.Task, error) {
 	var agentPersonality, memorySummary sql.NullString
 	var chatSessionID, provider, model, userID, createdBy sql.NullString
 	var outputToChat, inheritSessionContext sql.NullBool
-	var mcpServersJSON []byte
+	var mcpServersJSON sql.NullString
 
 	err := s.db.QueryRowContext(ctx, query, taskID).Scan(
 		&task.ID, &task.Name, &task.Description, &task.Type, &task.Enabled,
@@ -274,18 +274,10 @@ func (s *PostgresStorage) GetTask(taskID string) (*model.Task, error) {
 		task.CreatedBy = createdBy.String
 	}
 
-	fmt.Printf("[DEBUG] GetTask BEFORE check: TaskID=%s, mcpServersJSON=%v, len=%d, isNil=%v\n", task.ID, mcpServersJSON, len(mcpServersJSON), mcpServersJSON == nil)
-	if len(mcpServersJSON) > 0 {
-		fmt.Printf("[DEBUG] GetTask: TaskID=%s, mcpServersJSON=%s, len=%d\n", task.ID, string(mcpServersJSON), len(mcpServersJSON))
-		var servers []string
-		if err := json.Unmarshal(mcpServersJSON, &servers); err == nil {
-			task.MCPServers = servers
-			fmt.Printf("[DEBUG] GetTask: TaskID=%s, MCPServers=%v\n", task.ID, task.MCPServers)
-		} else {
-			fmt.Printf("[DEBUG] GetTask: TaskID=%s, unmarshal error: %v\n", task.ID, err)
+	if mcpServersJSON.Valid && mcpServersJSON.String != "" {
+		if err := json.Unmarshal([]byte(mcpServersJSON.String), &task.MCPServers); err != nil {
+			fmt.Printf("Warning: Failed to unmarshal mcp_servers for task %s: %v\n", task.ID, err)
 		}
-	} else {
-		fmt.Printf("[DEBUG] GetTask: TaskID=%s, mcpServersJSON is empty or nil\n", task.ID)
 	}
 
 	return &task, nil
