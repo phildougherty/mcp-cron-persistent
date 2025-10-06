@@ -327,14 +327,17 @@ func (s *Scheduler) RemoveTask(taskID string) error {
 
 // GetTask retrieves a task by ID
 func (s *Scheduler) GetTask(taskID string) (*model.Task, error) {
+	fmt.Printf("[DEBUG] Scheduler.GetTask called for taskID=%s\n", taskID)
 	if s.storage != nil {
 		task, err := s.storage.LoadTask(taskID)
 		if err == nil {
+			fmt.Printf("[DEBUG] Scheduler.GetTask: Loaded from storage, MCPServers=%v\n", task.MCPServers)
 			s.mu.Lock()
 			s.tasks[taskID] = task
 			s.mu.Unlock()
 			return task, nil
 		}
+		fmt.Printf("[DEBUG] Scheduler.GetTask: Storage load failed with error: %v, falling back to cache\n", err)
 	}
 
 	s.mu.RLock()
@@ -343,6 +346,7 @@ func (s *Scheduler) GetTask(taskID string) (*model.Task, error) {
 	if !exists {
 		return nil, errors.NotFound("task", taskID)
 	}
+	fmt.Printf("[DEBUG] Scheduler.GetTask: Returning from cache, MCPServers=%v\n", task.MCPServers)
 	return task, nil
 }
 
