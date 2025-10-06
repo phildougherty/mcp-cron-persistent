@@ -258,6 +258,8 @@ func (s *PostgresStorage) GetTask(taskID string) (*model.Task, error) {
 	if outputToChat.Valid {
 		task.OutputToChat = outputToChat.Bool
 	}
+	fmt.Printf("[DEBUG] LoadTask: taskID=%s, outputToChat.Valid=%v, outputToChat.Bool=%v, task.OutputToChat=%v\n",
+		taskID, outputToChat.Valid, outputToChat.Bool, task.OutputToChat)
 	if inheritSessionContext.Valid {
 		task.InheritSessionContext = inheritSessionContext.Bool
 	}

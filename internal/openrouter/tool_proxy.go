@@ -173,12 +173,31 @@ func (tp *ToolProxy) ExecuteTool(ctx context.Context, toolName string, arguments
 		}
 	}
 
-	// Call the mcp-compose proxy tool endpoint
-	url := fmt.Sprintf("%s/%s", tp.proxyURL, toolName)
+	// Parse tool name: mcp_{serverName}_{toolName}
+	parts := strings.SplitN(toolName, "_", 3)
+	if len(parts) < 3 || parts[0] != "mcp" {
+		return "", fmt.Errorf("invalid tool name format: %s (expected mcp_SERVER_TOOL)", toolName)
+	}
 
-	requestBody, err := json.Marshal(args)
+	serverName := parts[1]
+	actualToolName := parts[2]
+
+	// Make JSON-RPC request to server endpoint
+	url := fmt.Sprintf("%s/%s", tp.proxyURL, serverName)
+
+	rpcRequest := map[string]interface{}{
+		"jsonrpc": "2.0",
+		"method":  "tools/call",
+		"params": map[string]interface{}{
+			"name":      actualToolName,
+			"arguments": args,
+		},
+		"id": 1,
+	}
+
+	requestBody, err := json.Marshal(rpcRequest)
 	if err != nil {
-		return "", fmt.Errorf("failed to marshal request body: %w", err)
+		return "", fmt.Errorf("failed to marshal JSON-RPC request: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(requestBody))
@@ -204,23 +223,38 @@ func (tp *ToolProxy) ExecuteTool(ctx context.Context, toolName string, arguments
 	}
 
 	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("tool call to %s failed with status %d: %s", toolName, resp.StatusCode, string(bodyBytes))
+		return "", fmt.Errorf("tool call to %s/%s failed with status %d: %s", serverName, actualToolName, resp.StatusCode, string(bodyBytes))
 	}
 
-	// Parse and return the result - let the LLM figure out what it means
-	var result interface{}
-	if len(bodyBytes) > 0 {
-		if err := json.Unmarshal(bodyBytes, &result); err != nil {
-			// If JSON parsing fails, return the raw response
-			return string(bodyBytes), nil
-		}
-	} else {
-		return "Success", nil
+	// Parse JSON-RPC response
+	var rpcResponse struct {
+		Result struct {
+			Content []struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"content"`
+		} `json:"result"`
+		Error *struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
 	}
 
-	// Just return the raw JSON - let the LLM interpret it
-	resultBytes, _ := json.MarshalIndent(result, "", "  ")
-	return string(resultBytes), nil
+	if err := json.Unmarshal(bodyBytes, &rpcResponse); err != nil {
+		// If JSON-RPC parsing fails, return raw response
+		return string(bodyBytes), nil
+	}
+
+	if rpcResponse.Error != nil {
+		return "", fmt.Errorf("MCP tool error: %s (code %d)", rpcResponse.Error.Message, rpcResponse.Error.Code)
+	}
+
+	// Extract text content from response
+	if len(rpcResponse.Result.Content) > 0 {
+		return rpcResponse.Result.Content[0].Text, nil
+	}
+
+	return "Success", nil
 }
 
 func (tp *ToolProxy) convertOpenAPIToTools(spec map[string]interface{}) []Tool {
