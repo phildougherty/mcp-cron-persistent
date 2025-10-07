@@ -58,6 +58,7 @@ type Scheduler struct {
 	maintenanceWindows map[string]*model.MaintenanceWindow
 	timeWindows        map[string]*model.TimeWindow
 	timezoneCache      map[string]*time.Location
+	timezoneMu         sync.RWMutex
 	metricsCollector   *observability.MetricsCollector
 }
 
@@ -150,7 +151,11 @@ func (s *Scheduler) getLocation(timezone string) (*time.Location, error) {
 		timezone = "UTC"
 	}
 
-	if loc, exists := s.timezoneCache[timezone]; exists {
+	s.timezoneMu.RLock()
+	loc, exists := s.timezoneCache[timezone]
+	s.timezoneMu.RUnlock()
+
+	if exists {
 		return loc, nil
 	}
 
@@ -159,7 +164,10 @@ func (s *Scheduler) getLocation(timezone string) (*time.Location, error) {
 		return nil, err
 	}
 
+	s.timezoneMu.Lock()
 	s.timezoneCache[timezone] = loc
+	s.timezoneMu.Unlock()
+
 	return loc, nil
 }
 
