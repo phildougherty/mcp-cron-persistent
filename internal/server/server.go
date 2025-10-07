@@ -63,6 +63,10 @@ type AITaskParams struct {
 	ModelHint    string  `json:"modelHint,omitempty" description:"hint for model selection: fast, cheap, powerful, local, balanced"`
 	RequireLocal bool    `json:"requireLocal,omitempty" description:"require local model execution"`
 	MaxCost      float64 `json:"maxCost,omitempty" description:"maximum cost per execution"`
+	// Chat Integration
+	ChatSessionID        string `json:"chat_session_id,omitempty" description:"chat session ID to link this task to"`
+	OutputToChat         *bool  `json:"output_to_chat,omitempty" description:"whether to send task output to linked chat session"`
+	InheritSessionContext *bool  `json:"inherit_session_context,omitempty" description:"whether to inherit context from linked chat session"`
 }
 
 // AgentParams holds parameters for agent creation
@@ -793,11 +797,17 @@ func applyChatContext(task *model.Task, chatCtx *ChatContext) {
 
 // handleUpdateTask updates an existing task
 func (s *MCPServer) handleUpdateTask(request *protocol.CallToolRequest) (*protocol.CallToolResult, error) {
+	fmt.Printf("[DEBUG] handleUpdateTask: ENTERED - RawArguments=%s\n", string(request.RawArguments))
+
 	// Extract parameters
 	var params AITaskParams
 	if err := extractParams(request, &params); err != nil {
+		fmt.Printf("[DEBUG] handleUpdateTask: extractParams FAILED: %v\n", err)
 		return createErrorResponse(err)
 	}
+
+	fmt.Printf("[DEBUG] handleUpdateTask: After extractParams - ID=%s, ChatSessionID=%s, OutputToChat=%v\n",
+		params.ID, params.ChatSessionID, params.OutputToChat)
 
 	if params.ID == "" {
 		return createErrorResponse(errors.InvalidInput("task ID is required"))
@@ -824,6 +834,9 @@ func (s *MCPServer) handleUpdateTask(request *protocol.CallToolRequest) (*protoc
 
 // updateTaskFields updates task fields with provided values
 func updateTaskFields(task *model.Task, params AITaskParams, rawJSON []byte) {
+	fmt.Printf("[DEBUG] updateTaskFields: params.ChatSessionID=%s, params.OutputToChat=%v, params.InheritSessionContext=%v\n",
+		params.ChatSessionID, params.OutputToChat, params.InheritSessionContext)
+
 	// Update non-empty string fields
 	if params.Name != "" {
 		task.Name = params.Name
@@ -848,6 +861,20 @@ func updateTaskFields(task *model.Task, params AITaskParams, rawJSON []byte) {
 		} else if strings.EqualFold(params.Type, model.TypeShellCommand.String()) {
 			task.Type = model.TypeShellCommand.String()
 		}
+	}
+
+	// Chat integration fields
+	if params.ChatSessionID != "" {
+		fmt.Printf("[DEBUG] updateTaskFields: Setting ChatSessionID from '%s' to '%s'\n", task.ChatSessionID, params.ChatSessionID)
+		task.ChatSessionID = params.ChatSessionID
+	}
+	if params.OutputToChat != nil {
+		fmt.Printf("[DEBUG] updateTaskFields: Setting OutputToChat from %v to %v\n", task.OutputToChat, *params.OutputToChat)
+		task.OutputToChat = *params.OutputToChat
+	}
+	if params.InheritSessionContext != nil {
+		fmt.Printf("[DEBUG] updateTaskFields: Setting InheritSessionContext from %v to %v\n", task.InheritSessionContext, *params.InheritSessionContext)
+		task.InheritSessionContext = *params.InheritSessionContext
 	}
 
 	// Only update Enabled if it's explicitly in the JSON
