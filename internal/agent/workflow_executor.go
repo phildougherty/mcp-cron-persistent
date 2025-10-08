@@ -94,19 +94,56 @@ func (we *WorkflowExecutor) Execute(ctx context.Context, task *model.Task, timeo
 }
 
 type WorkflowExecutionResult struct {
-	ExecutionID string                 `json:"execution_id"`
+	ExecutionID string                 `json:"executionId"`
 	Status      string                 `json:"status"`
 	Output      map[string]interface{} `json:"output"`
+	NodeStates  []NodeExecutionState   `json:"nodeStates,omitempty"`
 	Error       string                 `json:"error,omitempty"`
 	Duration    string                 `json:"duration"`
 }
 
+type NodeExecutionState struct {
+	NodeID      string                 `json:"node_id"`
+	Status      string                 `json:"status"`
+	StartedAt   time.Time              `json:"started_at"`
+	CompletedAt *time.Time             `json:"completed_at,omitempty"`
+	Error       string                 `json:"error,omitempty"`
+	Output      map[string]interface{} `json:"output,omitempty"`
+}
+
 func (we *WorkflowExecutor) storeSuccessResult(taskID string, startTime time.Time, workflowResult *WorkflowExecutionResult) {
-	outputJSON, _ := json.MarshalIndent(workflowResult.Output, "", "  ")
+	var finalOutput string
+
+	if len(workflowResult.NodeStates) > 0 {
+		lastNode := workflowResult.NodeStates[len(workflowResult.NodeStates)-1]
+
+		if lastNode.Output != nil {
+			if response, ok := lastNode.Output["response"].(string); ok {
+				finalOutput = response
+			} else if content, ok := lastNode.Output["content"].(string); ok {
+				finalOutput = content
+			} else if result, ok := lastNode.Output["result"]; ok {
+				if resultStr, isString := result.(string); isString {
+					finalOutput = resultStr
+				} else {
+					outputJSON, _ := json.Marshal(result)
+					finalOutput = string(outputJSON)
+				}
+			} else {
+				outputJSON, _ := json.MarshalIndent(lastNode.Output, "", "  ")
+				finalOutput = string(outputJSON)
+			}
+		}
+	}
+
+	if finalOutput == "" {
+		outputJSON, _ := json.MarshalIndent(workflowResult.Output, "", "  ")
+		finalOutput = string(outputJSON)
+	}
 
 	result := &model.Result{
 		TaskID:    taskID,
-		Output:    string(outputJSON),
+		Output:    finalOutput,
 		ExitCode:  0,
 		StartTime: startTime,
 		EndTime:   time.Now(),
