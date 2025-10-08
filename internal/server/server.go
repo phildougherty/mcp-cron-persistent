@@ -69,6 +69,17 @@ type AITaskParams struct {
 	InheritSessionContext *bool  `json:"inherit_session_context,omitempty" description:"whether to inherit context from linked chat session"`
 }
 
+type WorkflowTaskParams struct {
+	Name          string `json:"name" description:"Name of the workflow task"`
+	Description   string `json:"description,omitempty" description:"Description of the workflow task"`
+	WorkflowID    string `json:"workflowId" description:"ID of the workflow to execute"`
+	WorkflowName  string `json:"workflowName,omitempty" description:"Name of the workflow for display"`
+	Schedule      string `json:"schedule" description:"Cron schedule expression"`
+	Enabled       bool   `json:"enabled,omitempty" description:"Whether task is enabled (default: true)"`
+	OutputToChat  bool   `json:"outputToChat,omitempty" description:"Send results to chat session"`
+	ChatSessionID string `json:"chatSessionId,omitempty" description:"Chat session ID for output"`
+}
+
 // AgentParams holds parameters for agent creation
 type AgentParams struct {
 	Name        string `json:"name" description:"agent name"`
@@ -103,21 +114,22 @@ type RunTaskParams struct {
 
 // MCPServer represents the MCP scheduler server
 type MCPServer struct {
-	scheduler        *scheduler.Scheduler
-	cmdExecutor      *command.CommandExecutor
-	agentExecutor    *agent.AgentExecutor
-	server           *server.Server
-	httpServer       *http.Server
-	address          string
-	port             int
-	stopCh           chan struct{}
-	wg               sync.WaitGroup
-	config           *config.Config
-	logger           *logging.Logger
-	shutdownMutex    sync.Mutex
-	isShuttingDown   bool
-	metricsCollector *observability.MetricsCollector
-	storage          scheduler.Storage
+	scheduler         *scheduler.Scheduler
+	cmdExecutor       *command.CommandExecutor
+	agentExecutor     *agent.AgentExecutor
+	workflowExecutor  *agent.WorkflowExecutor
+	server            *server.Server
+	httpServer        *http.Server
+	address           string
+	port              int
+	stopCh            chan struct{}
+	wg                sync.WaitGroup
+	config            *config.Config
+	logger            *logging.Logger
+	shutdownMutex     sync.Mutex
+	isShuttingDown    bool
+	metricsCollector  *observability.MetricsCollector
+	storage           scheduler.Storage
 }
 
 // NewMCPServer creates a new MCP scheduler server
@@ -173,17 +185,22 @@ func NewMCPServer(cfg *config.Config, scheduler *scheduler.Scheduler, cmdExecuto
 	metricsCollector := observability.NewMetricsCollector(logger)
 
 	// Create MCP Server
+	dashboardURL := os.Getenv("DASHBOARD_INTERNAL_URL")
+	if dashboardURL == "" {
+		dashboardURL = "http://mcp-compose-dashboard:3001"
+	}
+
 	mcpServer := &MCPServer{
-		scheduler:        scheduler,
-		cmdExecutor:      cmdExecutor,
-		agentExecutor:    agentExecutor,
-		address:          cfg.Server.Address,
-		port:             cfg.Server.Port,
-		stopCh:           make(chan struct{}),
-		config:           cfg,
-		logger:           logger,
-		metricsCollector: metricsCollector, // Add this
-		// storage will be set when scheduler.SetStorage is called
+		scheduler:         scheduler,
+		cmdExecutor:       cmdExecutor,
+		agentExecutor:     agentExecutor,
+		workflowExecutor:  agent.NewWorkflowExecutor(dashboardURL),
+		address:           cfg.Server.Address,
+		port:              cfg.Server.Port,
+		stopCh:            make(chan struct{}),
+		config:            cfg,
+		logger:            logger,
+		metricsCollector:  metricsCollector,
 	}
 
 	// Set up scheduler with metrics collector
@@ -624,6 +641,59 @@ func (s *MCPServer) handleAddAITask(request *protocol.CallToolRequest) (*protoco
 	return createTaskResponse(task)
 }
 
+func (s *MCPServer) handleAddWorkflowTask(request *protocol.CallToolRequest) (*protocol.CallToolResult, error) {
+	var params WorkflowTaskParams
+	if err := extractParams(request, &params); err != nil {
+		return createErrorResponse(err)
+	}
+
+	if params.WorkflowID == "" {
+		return createErrorResponse(errors.InvalidInput("workflowId is required"))
+	}
+
+	if params.Schedule == "" {
+		return createErrorResponse(errors.InvalidInput("schedule is required"))
+	}
+
+	s.logger.Debugf("Handling add_workflow_task request for workflow %s", params.WorkflowID)
+
+	task := createBaseTask(params.Name, params.Schedule, params.Description, params.Enabled)
+	task.Type = string(model.TypeWorkflow)
+	task.WorkflowID = params.WorkflowID
+	task.WorkflowName = params.WorkflowName
+	task.OutputToChat = params.OutputToChat
+	task.ChatSessionID = params.ChatSessionID
+
+	chatCtx := extractChatContext(request)
+	applyChatContext(task, chatCtx)
+
+	if err := s.scheduler.AddTask(task); err != nil {
+		activity.BroadcastActivity("ERROR", "task_management",
+			fmt.Sprintf("Failed to create workflow task '%s': %s", params.Name, err.Error()),
+			map[string]interface{}{
+				"taskName":   params.Name,
+				"taskType":   "workflow",
+				"workflowId": params.WorkflowID,
+				"error":      err.Error(),
+			})
+		return createErrorResponse(err)
+	}
+
+	activity.BroadcastActivity("INFO", "task_management",
+		fmt.Sprintf("New workflow task created: '%s'", task.Name),
+		map[string]interface{}{
+			"taskId":       task.ID,
+			"taskName":     task.Name,
+			"taskType":     "workflow",
+			"schedule":     task.Schedule,
+			"enabled":      task.Enabled,
+			"workflowId":   task.WorkflowID,
+			"workflowName": task.WorkflowName,
+		})
+
+	return createTaskResponse(task)
+}
+
 // handleCreateAgent creates a new autonomous agent
 func (s *MCPServer) handleCreateAgent(request *protocol.CallToolRequest) (*protocol.CallToolResult, error) {
 	// Extract parameters
@@ -1031,13 +1101,12 @@ func (s *MCPServer) Execute(ctx context.Context, task *model.Task, timeout time.
 
 	switch taskType {
 	case model.TypeAI.String():
-		// Use model routing if enabled
 		if s.config.ModelRouter.Enabled {
 			result, err := agent.RunTaskWithModelRouting(ctx, task, s.config)
 			if err != nil {
 				return err
 			}
-			// Store the result
+
 			agentResult := &model.Result{
 				TaskID:    task.ID,
 				Prompt:    task.Prompt,
@@ -1049,9 +1118,12 @@ func (s *MCPServer) Execute(ctx context.Context, task *model.Task, timeout time.
 			s.agentExecutor.StoreResult(task.ID, agentResult)
 			return nil
 		}
-		// Fallback to original agent executor
+
 		s.logger.Infof("Routing to AgentExecutor for AI task")
 		return s.agentExecutor.Execute(ctx, task, timeout)
+	case model.TypeWorkflow.String():
+		s.logger.Infof("Routing to WorkflowExecutor for workflow task")
+		return s.workflowExecutor.Execute(ctx, task, timeout)
 	case model.TypeShellCommand.String(), "":
 		s.logger.Infof("Routing to CommandExecutor for shell command task")
 		return s.cmdExecutor.Execute(ctx, task, timeout)

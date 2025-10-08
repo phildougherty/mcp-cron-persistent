@@ -16,6 +16,7 @@ type TaskStatus string
 const (
 	TypeShellCommand TaskType = "shell"
 	TypeAI           TaskType = "ai"
+	TypeWorkflow     TaskType = "workflow"
 )
 
 // Task status constants
@@ -47,9 +48,11 @@ type Task struct {
 	ID          string     `json:"id"`
 	Name        string     `json:"name"`
 	Description string     `json:"description"`
-	Command     string     `json:"command,omitempty" description:"command for shell"`
-	Prompt      string     `json:"prompt,omitempty" description:"prompt to use for AI"`
-	Schedule    string     `json:"schedule"`
+	Command      string     `json:"command,omitempty" description:"command for shell"`
+	Prompt       string     `json:"prompt,omitempty" description:"prompt to use for AI"`
+	WorkflowID   string     `json:"workflowId,omitempty" description:"ID of workflow to execute"`
+	WorkflowName string     `json:"workflowName,omitempty" description:"Name of workflow for display"`
+	Schedule     string     `json:"schedule"`
 	Enabled     bool       `json:"enabled"`
 	Type        string     `json:"type"`
 	LastRun     time.Time  `json:"lastRun,omitempty"`

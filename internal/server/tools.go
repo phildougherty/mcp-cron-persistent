@@ -48,6 +48,12 @@ func (s *MCPServer) registerToolsDeclarative() {
 			Parameters:  AITaskParams{},
 		},
 		{
+			Name:        "add_workflow_task",
+			Description: "Adds a new scheduled workflow task that will execute a workflow on a cron schedule",
+			Handler:     s.handleAddWorkflowTask,
+			Parameters:  WorkflowTaskParams{},
+		},
+		{
 			Name:        "update_task",
 			Description: "Updates an existing task",
 			Handler:     s.handleUpdateTask,
