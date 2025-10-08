@@ -1134,11 +1134,17 @@ func (s *MCPServer) Execute(ctx context.Context, task *model.Task, timeout time.
 
 // GetTaskResult retrieves execution result for a task regardless of executor type
 func (s *MCPServer) GetTaskResult(taskID string) (*model.Result, bool) {
-	// First try to get the result from the agent executor
+	// Try workflow executor first (for workflow tasks)
+	if result, exists := s.workflowExecutor.GetTaskResult(taskID); exists {
+		return result, true
+	}
+
+	// Try agent executor (for AI tasks)
 	if result, exists := s.agentExecutor.GetTaskResult(taskID); exists {
 		return result, true
 	}
-	// If not found in agent executor, try the command executor
+
+	// Finally try command executor (for shell tasks)
 	return s.cmdExecutor.GetTaskResult(taskID)
 }
 

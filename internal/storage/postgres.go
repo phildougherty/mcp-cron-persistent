@@ -86,10 +86,11 @@ func (s *PostgresStorage) createTask(ctx context.Context, task *model.Task) erro
 			timezone, status, created_at, updated_at, conversation_id,
 			conversation_name, conversation_context, is_agent, agent_personality,
 			memory_summary, last_memory_update, user_id, created_by,
-			chat_session_id, output_to_chat, inherit_session_context, provider, model, mcp_servers
+			chat_session_id, output_to_chat, inherit_session_context, provider, model, mcp_servers,
+			workflow_id, workflow_name
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21,
-			$22, $23, $24, $25, $26, $27
+			$22, $23, $24, $25, $26, $27, $28, $29
 		)`
 
 	var mcpServersJSON interface{}
@@ -123,6 +124,7 @@ func (s *PostgresStorage) createTask(ctx context.Context, task *model.Task) erro
 		userID, createdBy,
 		task.ChatSessionID, task.OutputToChat, task.InheritSessionContext,
 		task.Provider, task.Model, mcpServersJSON,
+		task.WorkflowID, task.WorkflowName,
 	)
 
 	if err != nil {
@@ -142,7 +144,7 @@ func (s *PostgresStorage) updateTask(ctx context.Context, task *model.Task) erro
 			is_agent = $14, agent_personality = $15, memory_summary = $16,
 			last_memory_update = $17, last_run = $18, next_run = $19, chat_session_id = $20,
 			output_to_chat = $21, inherit_session_context = $22, provider = $23, model = $24,
-			mcp_servers = $25
+			mcp_servers = $25, workflow_id = $26, workflow_name = $27
 		WHERE id = $1`
 
 	var lastRun, nextRun interface{}
@@ -173,6 +175,7 @@ func (s *PostgresStorage) updateTask(ctx context.Context, task *model.Task) erro
 		task.LastMemoryUpdate, lastRun, nextRun,
 		task.ChatSessionID, task.OutputToChat, task.InheritSessionContext,
 		task.Provider, task.Model, mcpServersJSON,
+		task.WorkflowID, task.WorkflowName,
 	)
 
 	if err != nil {
@@ -198,7 +201,8 @@ func (s *PostgresStorage) GetTask(taskID string) (*model.Task, error) {
 			   status, last_run, next_run, created_at, updated_at,
 			   conversation_id, conversation_name, conversation_context,
 			   is_agent, agent_personality, memory_summary, last_memory_update,
-			   chat_session_id, output_to_chat, inherit_session_context, provider, model, mcp_servers, user_id, created_by
+			   chat_session_id, output_to_chat, inherit_session_context, provider, model, mcp_servers, user_id, created_by,
+			   workflow_id, workflow_name
 		FROM task_scheduler.scheduler_tasks
 		WHERE id = $1`
 
@@ -209,6 +213,7 @@ func (s *PostgresStorage) GetTask(taskID string) (*model.Task, error) {
 	var chatSessionID, provider, model, userID, createdBy sql.NullString
 	var outputToChat, inheritSessionContext sql.NullBool
 	var mcpServersJSON sql.NullString
+	var workflowID, workflowName sql.NullString
 
 	err := s.db.QueryRowContext(ctx, query, taskID).Scan(
 		&task.ID, &task.Name, &task.Description, &task.Type, &task.Enabled,
@@ -217,6 +222,7 @@ func (s *PostgresStorage) GetTask(taskID string) (*model.Task, error) {
 		&conversationID, &conversationName, &conversationContext,
 		&task.IsAgent, &agentPersonality, &memorySummary, &lastMemoryUpdate,
 		&chatSessionID, &outputToChat, &inheritSessionContext, &provider, &model, &mcpServersJSON, &userID, &createdBy,
+		&workflowID, &workflowName,
 	)
 
 	if err == sql.ErrNoRows {
@@ -275,6 +281,12 @@ func (s *PostgresStorage) GetTask(taskID string) (*model.Task, error) {
 	if createdBy.Valid {
 		task.CreatedBy = createdBy.String
 	}
+	if workflowID.Valid {
+		task.WorkflowID = workflowID.String
+	}
+	if workflowName.Valid {
+		task.WorkflowName = workflowName.String
+	}
 
 	if mcpServersJSON.Valid && mcpServersJSON.String != "" {
 		if err := json.Unmarshal([]byte(mcpServersJSON.String), &task.MCPServers); err != nil {
@@ -304,7 +316,8 @@ func (s *PostgresStorage) ListTasks() ([]*model.Task, error) {
 		SELECT id, name, description, type, enabled, command, prompt, schedule,
 			   status, last_run, next_run, created_at, updated_at,
 			   conversation_id, conversation_name, is_agent, chat_session_id,
-			   output_to_chat, inherit_session_context, provider, model, mcp_servers
+			   output_to_chat, inherit_session_context, provider, model, mcp_servers,
+			   workflow_id, workflow_name
 		FROM task_scheduler.scheduler_tasks
 		ORDER BY created_at DESC`
 
@@ -323,6 +336,7 @@ func (s *PostgresStorage) ListTasks() ([]*model.Task, error) {
 		var outputToChat, inheritSessionContext sql.NullBool
 		var provider, model sql.NullString
 		var mcpServersJSON sql.NullString
+		var workflowID, workflowName sql.NullString
 
 		err := rows.Scan(
 			&task.ID, &task.Name, &task.Description, &task.Type,
@@ -330,6 +344,7 @@ func (s *PostgresStorage) ListTasks() ([]*model.Task, error) {
 			&task.Status, &lastRun, &nextRun, &task.CreatedAt, &task.UpdatedAt,
 			&conversationID, &conversationName, &task.IsAgent, &chatSessionID,
 			&outputToChat, &inheritSessionContext, &provider, &model, &mcpServersJSON,
+			&workflowID, &workflowName,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan task: %w", err)
@@ -367,6 +382,12 @@ func (s *PostgresStorage) ListTasks() ([]*model.Task, error) {
 		}
 		if model.Valid {
 			task.Model = model.String
+		}
+		if workflowID.Valid {
+			task.WorkflowID = workflowID.String
+		}
+		if workflowName.Valid {
+			task.WorkflowName = workflowName.String
 		}
 		if mcpServersJSON.Valid && mcpServersJSON.String != "" {
 			fmt.Printf("[DEBUG] ListTasks: Task=%s, mcpServersJSON=%s\n", task.ID, mcpServersJSON.String)
