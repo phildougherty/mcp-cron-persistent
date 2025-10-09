@@ -947,11 +947,34 @@ func updateTaskFields(task *model.Task, params AITaskParams, rawJSON []byte) {
 		task.InheritSessionContext = *params.InheritSessionContext
 	}
 
-	// Only update Enabled if it's explicitly in the JSON
+	// Extract and update provider/model from raw JSON (prefixed with _)
 	var rawParams map[string]interface{}
 	if err := utils.JsonUnmarshal(rawJSON, &rawParams); err == nil {
 		if _, exists := rawParams["enabled"]; exists {
 			task.Enabled = params.Enabled
+		}
+
+		if provider, ok := rawParams["_provider"].(string); ok && provider != "" {
+			fmt.Printf("[DEBUG] updateTaskFields: Setting Provider from '%s' to '%s'\n", task.Provider, provider)
+			task.Provider = provider
+		}
+
+		if model, ok := rawParams["_model"].(string); ok && model != "" {
+			fmt.Printf("[DEBUG] updateTaskFields: Setting Model from '%s' to '%s'\n", task.Model, model)
+			task.Model = model
+		}
+
+		if mcpServers, ok := rawParams["_mcp_servers"].([]interface{}); ok {
+			serverList := make([]string, 0, len(mcpServers))
+			for _, s := range mcpServers {
+				if str, ok := s.(string); ok {
+					serverList = append(serverList, str)
+				}
+			}
+			if len(serverList) > 0 {
+				fmt.Printf("[DEBUG] updateTaskFields: Setting MCPServers to %v\n", serverList)
+				task.MCPServers = serverList
+			}
 		}
 	}
 
